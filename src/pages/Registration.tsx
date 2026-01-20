@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,24 +9,111 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 
 const Registration: React.FC = () => {
   const navigate = useNavigate();
+  const { signUp, user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [domain, setDomain] = useState('');
-  const [registerNumber, setRegisterNumber] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password !== confirmPassword) {
-      alert('Passwords do not match!');
-      return;
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user && !authLoading) {
+      navigate('/lobby');
     }
-    // Navigate to OTP verification
-    navigate('/otp');
+  }, [user, authLoading, navigate]);
+
+  const validateForm = (): boolean => {
+    if (!email.trim()) {
+      toast.error('Please enter your email');
+      return false;
+    }
+
+    if (!domain) {
+      toast.error('Please select your domain');
+      return false;
+    }
+
+    if (!username.trim()) {
+      toast.error('Please enter a username');
+      return false;
+    }
+
+    if (username.length < 3) {
+      toast.error('Username must be at least 3 characters');
+      return false;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      toast.error('Username can only contain letters, numbers, and underscores');
+      return false;
+    }
+
+    if (!password) {
+      toast.error('Please enter a password');
+      return false;
+    }
+
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return false;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return false;
+    }
+
+    return true;
   };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!validateForm()) return;
+
+    const fullEmail = `${email}${domain}`;
+    setIsLoading(true);
+
+    try {
+      const { error } = await signUp(fullEmail, password, username);
+      
+      if (error) {
+        if (error.message.includes('already registered') || error.message.includes('already exists')) {
+          toast.error('An account with this email already exists. Please login instead.');
+        } else if (error.message.includes('invalid email')) {
+          toast.error('Please enter a valid email address.');
+        } else if (error.message.includes('weak password')) {
+          toast.error('Password is too weak. Please use a stronger password.');
+        } else {
+          toast.error(error.message || 'Registration failed. Please try again.');
+        }
+        return;
+      }
+
+      toast.success('Registration successful! Please check your email for verification.');
+      navigate('/otp', { state: { email: fullEmail, fromRegistration: true } });
+    } catch (err) {
+      toast.error('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-8">
@@ -52,13 +139,13 @@ const Registration: React.FC = () => {
                 placeholder="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
+                disabled={isLoading}
                 className="bg-black/30 border-border"
               />
             </div>
             <div>
               <label className="block text-sm mb-2 text-muted-foreground">Domain</label>
-              <Select value={domain} onValueChange={setDomain} required>
+              <Select value={domain} onValueChange={setDomain} disabled={isLoading}>
                 <SelectTrigger className="bg-black/30 border-border">
                   <SelectValue placeholder="Select" />
                 </SelectTrigger>
@@ -70,15 +157,15 @@ const Registration: React.FC = () => {
             </div>
           </div>
 
-          {/* Register Number */}
+          {/* Username */}
           <div>
-            <label className="block text-sm mb-2 text-muted-foreground">Register Number</label>
+            <label className="block text-sm mb-2 text-muted-foreground">Username</label>
             <Input
               type="text"
-              placeholder="URK-YY-DPT-NNNN"
-              value={registerNumber}
-              onChange={(e) => setRegisterNumber(e.target.value)}
-              required
+              placeholder="Choose a unique username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={isLoading}
               className="bg-black/30 border-border"
             />
           </div>
@@ -91,7 +178,7 @@ const Registration: React.FC = () => {
               placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
+              disabled={isLoading}
               className="bg-black/30 border-border"
             />
           </div>
@@ -104,18 +191,27 @@ const Registration: React.FC = () => {
               placeholder="Confirm your password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              required
+              disabled={isLoading}
               className="bg-black/30 border-border"
             />
           </div>
 
-          <Button type="submit" className="w-full gradient-primary text-primary-foreground font-bold py-3">
-            REGISTER
+          <Button 
+            type="submit" 
+            className="w-full gradient-primary text-primary-foreground font-bold py-3"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                REGISTERING...
+              </>
+            ) : (
+              'REGISTER'
+            )}
           </Button>
 
           <div className="flex justify-center gap-2 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-primary transition-colors">Forgot password?</a>
-            <span>•</span>
             <span>Already have an account?</span>
             <Link to="/login" className="text-primary hover:underline">Login</Link>
           </div>
