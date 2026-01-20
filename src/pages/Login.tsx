@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,18 +9,82 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const { signIn, user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [domain, setDomain] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user && !authLoading) {
+      navigate('/lobby');
+    }
+  }, [user, authLoading, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // For now, just navigate to lobby
-    navigate('/lobby');
+    
+    if (!email.trim()) {
+      toast.error('Please enter your email');
+      return;
+    }
+    
+    if (!domain) {
+      toast.error('Please select your domain');
+      return;
+    }
+    
+    if (!password) {
+      toast.error('Please enter your password');
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    const fullEmail = `${email}${domain}`;
+    setIsLoading(true);
+
+    try {
+      const { error } = await signIn(fullEmail, password);
+      
+      if (error) {
+        if (error.message.includes('Invalid login credentials')) {
+          toast.error('Invalid email or password. Please try again.');
+        } else if (error.message.includes('Email not confirmed')) {
+          toast.error('Please verify your email before logging in.');
+          navigate('/otp', { state: { email: fullEmail } });
+        } else {
+          toast.error(error.message || 'Login failed. Please try again.');
+        }
+        return;
+      }
+
+      toast.success('Welcome back, soldier!');
+      navigate('/lobby');
+    } catch (err) {
+      toast.error('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4">
@@ -46,13 +110,13 @@ const Login: React.FC = () => {
                 placeholder="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
+                disabled={isLoading}
                 className="bg-black/30 border-border"
               />
             </div>
             <div>
               <label className="block text-sm mb-2 text-muted-foreground">Domain</label>
-              <Select value={domain} onValueChange={setDomain} required>
+              <Select value={domain} onValueChange={setDomain} disabled={isLoading}>
                 <SelectTrigger className="bg-black/30 border-border">
                   <SelectValue placeholder="Select" />
                 </SelectTrigger>
@@ -72,17 +136,28 @@ const Login: React.FC = () => {
               placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
+              disabled={isLoading}
               className="bg-black/30 border-border"
             />
           </div>
 
-          <Button type="submit" className="w-full gradient-primary text-primary-foreground font-bold py-3">
-            LOGIN
+          <Button 
+            type="submit" 
+            className="w-full gradient-primary text-primary-foreground font-bold py-3"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                LOGGING IN...
+              </>
+            ) : (
+              'LOGIN'
+            )}
           </Button>
 
           <div className="flex justify-center gap-2 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-primary transition-colors">Forgot password?</a>
+            <Link to="/forgot-password" className="hover:text-primary transition-colors">Forgot password?</Link>
             <span>•</span>
             <Link to="/register" className="hover:text-primary transition-colors">Create new account</Link>
           </div>
