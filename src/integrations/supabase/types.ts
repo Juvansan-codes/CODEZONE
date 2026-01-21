@@ -167,6 +167,7 @@ export type Database = {
           rank: string
           total_matches: number
           total_wins: number
+          unique_id: string | null
           updated_at: string
           user_id: string
           username: string
@@ -184,6 +185,7 @@ export type Database = {
           rank?: string
           total_matches?: number
           total_wins?: number
+          unique_id?: string | null
           updated_at?: string
           user_id: string
           username: string
@@ -201,6 +203,7 @@ export type Database = {
           rank?: string
           total_matches?: number
           total_wins?: number
+          unique_id?: string | null
           updated_at?: string
           user_id?: string
           username?: string

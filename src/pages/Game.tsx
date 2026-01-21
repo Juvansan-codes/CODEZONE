@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { useGameSession, TeamSize } from '@/hooks/useGameSession';
+import { useAuth } from '@/contexts/AuthContext';
 
 const RANKS = [
   'Bronze Techie', 'Silver Debugger', 'Gold Architect', 'Platinum Engineer',
@@ -14,16 +16,47 @@ const QUESTIONS = [
   { title: 'Two Sum', description: 'Return indices that sum to target' },
 ];
 
+// Sabotage costs in seconds
+const SABOTAGE_COSTS = {
+  fog: 30,      // 30 seconds
+  invert: 45,   // 45 seconds
+  shake: 20,    // 20 seconds
+  memeNuke: 120 // 2 minutes
+};
+
 const formatTime = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
+const formatTimeVerbose = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins > 0) {
+    return `${mins}m ${secs}s`;
+  }
+  return `${secs}s`;
+};
+
 const Game: React.FC = () => {
   const navigate = useNavigate();
-  const [teamTime, setTeamTime] = useState(900);
-  const [enemyTime, setEnemyTime] = useState(900);
+  const [searchParams] = useSearchParams();
+  const { profile } = useAuth();
+  
+  // Get match parameters from URL
+  const matchId = searchParams.get('matchId') || undefined;
+  const teamSizeParam = parseInt(searchParams.get('teamSize') || '5') as TeamSize;
+  
+  const { 
+    gameState, 
+    startGame, 
+    stopGame, 
+    deductMyTime, 
+    deductEnemyTime, 
+    initializeDemo 
+  } = useGameSession(matchId);
+
   const [wins, setWins] = useState(0);
   const [question, setQuestion] = useState(QUESTIONS[0]);
   const [code, setCode] = useState('// Write your code. Earn glory.');
@@ -34,67 +67,99 @@ const Game: React.FC = () => {
   const [memeCooldown, setMemeCooldown] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
+  // Initialize game on mount
   useEffect(() => {
     setQuestion(QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)]);
+    
+    if (!matchId) {
+      // Demo mode - use team size from URL params
+      initializeDemo(teamSizeParam);
+    }
+    
+    // Start the game after a short delay
+    const timer = setTimeout(() => startGame(), 1000);
+    return () => clearTimeout(timer);
+  }, [matchId, teamSizeParam, initializeDemo, startGame]);
+
+  const addLog = useCallback((msg: string) => {
+    setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
   }, []);
 
-  const addLog = (msg: string) => {
-    setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
-  };
-
-  const checkEnd = () => {
-    if (enemyTime <= 0) {
+  const checkEnd = useCallback(() => {
+    if (gameState.enemyTeamTime <= 0) {
       setWins((prev) => prev + 1);
       toast.success('🏆 VICTORY!');
-      setEnemyTime(900);
-      setTeamTime(900);
+      stopGame();
     }
-    if (teamTime <= 0) {
+    if (gameState.myTeamTime <= 0) {
       toast.error('💀 DEFEAT');
-      setEnemyTime(900);
-      setTeamTime(900);
+      stopGame();
     }
-  };
+  }, [gameState.enemyTeamTime, gameState.myTeamTime, stopGame]);
+
+  useEffect(() => {
+    checkEnd();
+  }, [gameState.myTeamTime, gameState.enemyTeamTime, checkEnd]);
 
   const runCode = () => {
-    setEnemyTime((prev) => Math.max(0, prev - 10));
+    deductEnemyTime(10);
     toast.success('🔥 ENEMY LOST 10s');
     addLog('Run successful — chip damage dealt');
-    checkEnd();
   };
 
   const submitCode = () => {
-    setEnemyTime((prev) => Math.max(0, prev - 20));
-    toast.success('💥 FINISHER! Enemy -20s');
-    addLog('Submission landed');
-    checkEnd();
+    deductEnemyTime(30);
+    toast.success('💥 FINISHER! Enemy -30s');
+    addLog('Submission landed — massive damage!');
   };
 
-  const useSabotage = (type: 'fog' | 'invert' | 'shake', cost: number) => {
-    if (teamTime < cost) {
-      toast.error('⏱ Not enough Time Tokens!');
+  const useSabotage = (type: 'fog' | 'invert' | 'shake') => {
+    if (!gameState.sabotagesUnlocked) {
+      const halfwayPoint = gameState.matchDuration / 2;
+      const remainingUntilUnlock = Math.max(0, gameState.myTeamTime - halfwayPoint);
+      toast.error(`⏳ Sabotages unlock at halftime! (${formatTimeVerbose(remainingUntilUnlock)} remaining)`);
       return;
     }
-    setTeamTime((prev) => prev - cost);
+
+    const cost = SABOTAGE_COSTS[type];
+    
+    if (gameState.myTeamTime < cost) {
+      toast.error(`⏱ Not enough time! Need ${formatTimeVerbose(cost)}`);
+      return;
+    }
+    
+    deductMyTime(cost);
+    addLog(`Used ${type.toUpperCase()} sabotage — cost ${formatTimeVerbose(cost)}`);
 
     setSabotageEffects((prev) => ({ ...prev, [type]: true }));
     setTimeout(() => {
       setSabotageEffects((prev) => ({ ...prev, [type]: false }));
     }, type === 'shake' ? 500 : 4000);
+    
+    toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
   };
 
   const useMemeNuke = () => {
+    if (!gameState.sabotagesUnlocked) {
+      toast.error('⏳ Sabotages unlock at halftime!');
+      return;
+    }
+    
     if (memeCooldown) {
       toast.error('⏳ Meme Nuke recharging');
       return;
     }
-    if (teamTime < 60) {
-      toast.error('⏱ Not enough Time Tokens');
+    
+    const cost = SABOTAGE_COSTS.memeNuke;
+    
+    if (gameState.myTeamTime < cost) {
+      toast.error(`⏱ Not enough time! Need ${formatTimeVerbose(cost)}`);
       return;
     }
 
-    setTeamTime((prev) => prev - 60);
+    deductMyTime(cost);
     setMemeCooldown(true);
+    addLog(`MEME NUKE DEPLOYED — cost ${formatTimeVerbose(cost)}`);
 
     toast.info(
       <div className="text-center">
@@ -105,10 +170,25 @@ const Game: React.FC = () => {
       { duration: 5000 }
     );
 
-    setTimeout(() => setMemeCooldown(false), 60000);
+    // Cooldown is 3 minutes
+    setTimeout(() => setMemeCooldown(false), 180000);
+  };
+
+  const handleExitMatch = () => {
+    stopGame();
+    navigate('/lobby');
   };
 
   const currentRank = RANKS[Math.min(wins, RANKS.length - 1)];
+  
+  // Calculate progress percentages
+  const myTimePercent = (gameState.myTeamTime / gameState.matchDuration) * 100;
+  const enemyTimePercent = (gameState.enemyTeamTime / gameState.matchDuration) * 100;
+  
+  // Calculate halftime status
+  const halfwayPoint = gameState.matchDuration / 2;
+  const elapsedTime = gameState.matchDuration - gameState.myTeamTime;
+  const timeUntilSabotage = Math.max(0, halfwayPoint - elapsedTime);
 
   return (
     <div className="min-h-screen p-3 md:p-4">
@@ -121,10 +201,21 @@ const Game: React.FC = () => {
       <header className="glass-panel p-4 mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 rounded-xl">
         <div>
           <h1 className="font-orbitron text-xl md:text-2xl font-bold">STUDYGROUND : CODEWAR</h1>
-          <p className="text-sm text-primary">⚔️ Match Active — Solve to Survive</p>
+          <p className="text-sm text-primary">
+            ⚔️ {gameState.teamSize}v{gameState.teamSize} Match — {formatTimeVerbose(gameState.matchDuration)} Total
+          </p>
         </div>
-        <div className="px-4 py-2 rounded-xl border border-gold/40 bg-gradient-to-br from-gold/25 to-gold/10 text-gold font-orbitron font-bold">
-          {currentRank}
+        <div className="flex items-center gap-3">
+          <div className="px-3 py-1.5 rounded-lg border border-border bg-surface text-sm">
+            {gameState.sabotagesUnlocked ? (
+              <span className="text-primary">🔓 Sabotages Active</span>
+            ) : (
+              <span className="text-muted-foreground">🔒 Unlocks in {formatTime(timeUntilSabotage)}</span>
+            )}
+          </div>
+          <div className="px-4 py-2 rounded-xl border border-gold/40 bg-gradient-to-br from-gold/25 to-gold/10 text-gold font-orbitron font-bold">
+            {currentRank}
+          </div>
         </div>
       </header>
 
@@ -133,11 +224,17 @@ const Game: React.FC = () => {
         <aside className="lg:col-span-3 space-y-4">
           {/* Team Members */}
           <div className="glass-panel p-4">
-            <h3 className="font-bold mb-2">TEAM MEMBERS 👥</h3>
+            <h3 className="font-bold mb-2">YOUR TEAM 👥</h3>
             <div className="text-sm space-y-1">
-              <div>🔥 You</div>
-              <div>🛡 teammate-1</div>
-              <div>⚙ teammate-2</div>
+              {gameState.myTeam.map((member, i) => (
+                <div key={member.user_id} className="flex items-center gap-2">
+                  <span>{i === 0 ? '🔥' : i === 1 ? '🛡' : '⚙'}</span>
+                  <span className={member.user_id === profile?.user_id ? 'text-primary font-bold' : ''}>
+                    {member.username}
+                    {member.user_id === profile?.user_id && ' (You)'}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -146,12 +243,20 @@ const Game: React.FC = () => {
             <div className="mb-4">
               <div className="flex justify-between text-sm mb-1">
                 <span className="font-bold">YOUR TEAM ⏱️</span>
-                <span>{formatTime(teamTime)}</span>
+                <span className={gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''}>
+                  {formatTime(gameState.myTeamTime)}
+                </span>
               </div>
               <div className="h-3 bg-black/50 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-primary to-primary/70 transition-all duration-300"
-                  style={{ width: `${(teamTime / 900) * 100}%` }}
+                  className={`h-full transition-all duration-300 ${
+                    myTimePercent > 50 
+                      ? 'bg-gradient-to-r from-primary to-primary/70' 
+                      : myTimePercent > 25 
+                        ? 'bg-gradient-to-r from-gold to-gold/80' 
+                        : 'bg-gradient-to-r from-accent to-accent/70'
+                  }`}
+                  style={{ width: `${myTimePercent}%` }}
                 />
               </div>
             </div>
@@ -159,12 +264,12 @@ const Game: React.FC = () => {
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="font-bold text-accent">ENEMY ⏱️</span>
-                <span>{formatTime(enemyTime)}</span>
+                <span>{formatTime(gameState.enemyTeamTime)}</span>
               </div>
               <div className="h-3 bg-black/50 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-accent to-red-900 transition-all duration-300"
-                  style={{ width: `${(enemyTime / 900) * 100}%` }}
+                  style={{ width: `${enemyTimePercent}%` }}
                 />
               </div>
             </div>
@@ -172,26 +277,55 @@ const Game: React.FC = () => {
 
           {/* Sabotages */}
           <div className="glass-panel p-4">
-            <h3 className="font-bold mb-3">SABOTAGES 😈</h3>
+            <h3 className="font-bold mb-3">
+              SABOTAGES 😈 
+              {!gameState.sabotagesUnlocked && (
+                <span className="text-xs text-muted-foreground ml-2">🔒 Halftime</span>
+              )}
+            </h3>
             <div className="space-y-2">
-              <Button variant="outline" className="w-full justify-start" onClick={() => useSabotage('fog', 10)}>
-                Fog (10 Tokens)
+              <Button 
+                variant="outline" 
+                className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
+                onClick={() => useSabotage('fog')}
+                disabled={!gameState.sabotagesUnlocked}
+              >
+                <span>🌫 Fog</span>
+                <span className="text-xs text-muted-foreground">{formatTimeVerbose(SABOTAGE_COSTS.fog)}</span>
               </Button>
-              <Button variant="outline" className="w-full justify-start" onClick={() => useSabotage('invert', 15)}>
-                Invert (15 Tokens)
+              <Button 
+                variant="outline" 
+                className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
+                onClick={() => useSabotage('invert')}
+                disabled={!gameState.sabotagesUnlocked}
+              >
+                <span>🔄 Invert</span>
+                <span className="text-xs text-muted-foreground">{formatTimeVerbose(SABOTAGE_COSTS.invert)}</span>
               </Button>
-              <Button variant="outline" className="w-full justify-start" onClick={() => useSabotage('shake', 8)}>
-                Shake (8 Tokens)
+              <Button 
+                variant="outline" 
+                className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
+                onClick={() => useSabotage('shake')}
+                disabled={!gameState.sabotagesUnlocked}
+              >
+                <span>📳 Shake</span>
+                <span className="text-xs text-muted-foreground">{formatTimeVerbose(SABOTAGE_COSTS.shake)}</span>
               </Button>
               <Button
                 variant="outline"
-                className="w-full justify-start border-accent text-accent hover:bg-accent/20"
+                className={`w-full justify-between border-accent text-accent hover:bg-accent/20 ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
                 onClick={useMemeNuke}
-                disabled={memeCooldown}
+                disabled={memeCooldown || !gameState.sabotagesUnlocked}
               >
-                💀 MEME NUKE (60 Tokens)
+                <span>💀 MEME NUKE</span>
+                <span className="text-xs">{formatTimeVerbose(SABOTAGE_COSTS.memeNuke)}</span>
               </Button>
             </div>
+            {gameState.sabotagesUnlocked && (
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                ⚠️ Sabotages cost YOUR team's time!
+              </p>
+            )}
           </div>
         </aside>
 
@@ -215,23 +349,37 @@ const Game: React.FC = () => {
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={runCode} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={runCode} className="bg-primary hover:bg-primary/80">
               RUN
             </Button>
-            <Button onClick={submitCode} className="bg-yellow-600 hover:bg-yellow-700">
+            <Button onClick={submitCode} className="bg-gold text-gold-foreground hover:bg-gold/80">
               SUBMIT
             </Button>
-            <Button variant="outline" onClick={() => navigate('/lobby')}>
+            <Button variant="outline" onClick={handleExitMatch}>
               Exit Match
             </Button>
           </div>
         </main>
 
-        {/* Right - Kill Feed */}
-        <aside className="lg:col-span-3">
-          <div className="glass-panel p-4 h-full max-h-[500px]">
+        {/* Right - Kill Feed & Enemy Team */}
+        <aside className="lg:col-span-3 space-y-4">
+          {/* Enemy Team */}
+          <div className="glass-panel p-4">
+            <h3 className="font-bold mb-2 text-accent">ENEMY TEAM 💀</h3>
+            <div className="text-sm space-y-1">
+              {gameState.enemyTeam.map((member, i) => (
+                <div key={member.user_id} className="flex items-center gap-2 text-muted-foreground">
+                  <span>👤</span>
+                  <span>{member.username}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Kill Feed */}
+          <div className="glass-panel p-4 h-full max-h-[400px]">
             <h3 className="font-bold mb-3">KILL FEED</h3>
-            <div className="space-y-1 text-sm overflow-y-auto max-h-[400px] bg-white/5 rounded-lg p-3">
+            <div className="space-y-1 text-sm overflow-y-auto max-h-[320px] bg-white/5 rounded-lg p-3">
               {logs.map((log, i) => (
                 <div key={i} className="text-muted-foreground">{log}</div>
               ))}
