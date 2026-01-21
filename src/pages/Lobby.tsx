@@ -45,7 +45,8 @@ const Lobby: React.FC = () => {
         window.open('https://codelab.612151820.xyz/login', '_blank');
         setLoading(false);
       } else {
-        navigate('/game');
+        // Navigate to game with team size parameter
+        navigate(`/game?teamSize=${teamSize}`);
         setLoading(false);
       }
     }, 1500);
