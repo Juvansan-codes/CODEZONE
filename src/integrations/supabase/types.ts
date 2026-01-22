@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      challenges: {
+        Row: {
+          challenge_type: string
+          created_at: string
+          description: string
+          difficulty: string
+          end_date: string | null
+          id: string
+          is_active: boolean
+          requirements: Json
+          reward_coins: number
+          reward_gems: number
+          reward_xp: number
+          start_date: string | null
+          title: string
+        }
+        Insert: {
+          challenge_type?: string
+          created_at?: string
+          description: string
+          difficulty?: string
+          end_date?: string | null
+          id?: string
+          is_active?: boolean
+          requirements?: Json
+          reward_coins?: number
+          reward_gems?: number
+          reward_xp?: number
+          start_date?: string | null
+          title: string
+        }
+        Update: {
+          challenge_type?: string
+          created_at?: string
+          description?: string
+          difficulty?: string
+          end_date?: string | null
+          id?: string
+          is_active?: boolean
+          requirements?: Json
+          reward_coins?: number
+          reward_gems?: number
+          reward_xp?: number
+          start_date?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
       friendships: {
         Row: {
           created_at: string
@@ -37,6 +85,56 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      match_history: {
+        Row: {
+          coins_earned: number
+          created_at: string
+          duration_seconds: number
+          id: string
+          match_id: string
+          opponent_ids: string[]
+          problems_solved: number
+          result: string
+          score: number
+          user_id: string
+          xp_earned: number
+        }
+        Insert: {
+          coins_earned?: number
+          created_at?: string
+          duration_seconds?: number
+          id?: string
+          match_id: string
+          opponent_ids?: string[]
+          problems_solved?: number
+          result: string
+          score?: number
+          user_id: string
+          xp_earned?: number
+        }
+        Update: {
+          coins_earned?: number
+          created_at?: string
+          duration_seconds?: number
+          id?: string
+          match_id?: string
+          opponent_ids?: string[]
+          problems_solved?: number
+          result?: string
+          score?: number
+          user_id?: string
+          xp_earned?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_history_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       match_players: {
         Row: {
@@ -154,15 +252,91 @@ export type Database = {
         }
         Relationships: []
       }
+      parties: {
+        Row: {
+          created_at: string
+          game_mode: string
+          id: string
+          leader_id: string
+          match_id: string | null
+          status: string
+          team_size: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          game_mode?: string
+          id?: string
+          leader_id: string
+          match_id?: string | null
+          status?: string
+          team_size?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          game_mode?: string
+          id?: string
+          leader_id?: string
+          match_id?: string | null
+          status?: string
+          team_size?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "parties_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      party_members: {
+        Row: {
+          id: string
+          is_ready: boolean
+          joined_at: string
+          party_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          is_ready?: boolean
+          joined_at?: string
+          party_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          is_ready?: boolean
+          joined_at?: string
+          party_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "party_members_party_id_fkey"
+            columns: ["party_id"]
+            isOneToOne: false
+            referencedRelation: "parties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
           best_rank: string
           coins: number
           created_at: string
+          current_status: string | null
           display_name: string | null
           gems: number
           id: string
+          is_online: boolean | null
+          last_seen: string | null
           level: number
           rank: string
           total_matches: number
@@ -178,9 +352,12 @@ export type Database = {
           best_rank?: string
           coins?: number
           created_at?: string
+          current_status?: string | null
           display_name?: string | null
           gems?: number
           id?: string
+          is_online?: boolean | null
+          last_seen?: string | null
           level?: number
           rank?: string
           total_matches?: number
@@ -196,9 +373,12 @@ export type Database = {
           best_rank?: string
           coins?: number
           created_at?: string
+          current_status?: string | null
           display_name?: string | null
           gems?: number
           id?: string
+          is_online?: boolean | null
+          last_seen?: string | null
           level?: number
           rank?: string
           total_matches?: number
@@ -210,6 +390,92 @@ export type Database = {
           xp?: number
         }
         Relationships: []
+      }
+      user_analytics: {
+        Row: {
+          coins_earned: number
+          created_at: string
+          date: string
+          id: string
+          matches_played: number
+          matches_won: number
+          problems_solved: number
+          sabotages_used: number
+          time_played_seconds: number
+          user_id: string
+          xp_earned: number
+        }
+        Insert: {
+          coins_earned?: number
+          created_at?: string
+          date?: string
+          id?: string
+          matches_played?: number
+          matches_won?: number
+          problems_solved?: number
+          sabotages_used?: number
+          time_played_seconds?: number
+          user_id: string
+          xp_earned?: number
+        }
+        Update: {
+          coins_earned?: number
+          created_at?: string
+          date?: string
+          id?: string
+          matches_played?: number
+          matches_won?: number
+          problems_solved?: number
+          sabotages_used?: number
+          time_played_seconds?: number
+          user_id?: string
+          xp_earned?: number
+        }
+        Relationships: []
+      }
+      user_challenges: {
+        Row: {
+          challenge_id: string
+          claimed_at: string | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          is_completed: boolean
+          progress: number
+          target: number
+          user_id: string
+        }
+        Insert: {
+          challenge_id: string
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          progress?: number
+          target?: number
+          user_id: string
+        }
+        Update: {
+          challenge_id?: string
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          progress?: number
+          target?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_challenges_challenge_id_fkey"
+            columns: ["challenge_id"]
+            isOneToOne: false
+            referencedRelation: "challenges"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {

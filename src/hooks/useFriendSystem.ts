@@ -67,7 +67,7 @@ export const useFriendSystem = () => {
         username: profile?.username || 'Unknown',
         uniqueId: profile?.unique_id || '',
         status: f.status as 'pending' | 'accepted' | 'rejected',
-        isOnline: Math.random() > 0.5, // TODO: Implement real presence
+        isOnline: false, // Will be updated by usePresence hook
         isSentByMe: f.user_id === user.id,
       };
     });

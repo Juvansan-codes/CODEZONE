@@ -12,15 +12,15 @@ import { toast } from 'sonner';
 type GameMode = 'campaign' | 'duel' | 'practice';
 const maps = [{
   mode: 'campaign' as GameMode,
-  title: 'DSA Campaign',
-  description: 'Ranked progression'
+  title: 'StudyGround: The Quiet Ascent',
+  description: 'Story mode progression'
 }, {
   mode: 'duel' as GameMode,
   title: 'Clash Code',
   description: 'Competitive battlefield'
 }, {
   mode: 'practice' as GameMode,
-  title: 'Practice Lab',
+  title: 'Practice Arena',
   description: 'Unranked sandbox'
 }];
 const Lobby: React.FC = () => {
