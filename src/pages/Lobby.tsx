@@ -41,12 +41,16 @@ const Lobby: React.FC = () => {
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [selectedMode, setSelectedMode] = useState<GameMode>('campaign');
   const [teamSize, setTeamSize] = useState('5');
-  const { joinQueue, status, matchId } = useMatchmaking();
+  const { joinQueue, leaveQueue, status, matchId } = useMatchmaking();
   const loading = status === 'searching' || status === 'found';
 
   useEffect(() => {
     if (status === 'found' && matchId) {
-      navigate(`/game?matchId=${matchId}`);
+      // Small delay to show "Match Found!" toast before navigating
+      const timeout = setTimeout(() => {
+        navigate(`/game?matchId=${matchId}`);
+      }, 500);
+      return () => clearTimeout(timeout);
     }
   }, [status, matchId, navigate]);
 
@@ -74,7 +78,22 @@ const Lobby: React.FC = () => {
   const selectedMap = maps.find(m => m.mode === selectedMode) || maps[0];
 
   return <>
-    {loading && <LoadingScreen message="Entering battlefield..." />}
+    {loading && (
+      <div className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center gap-5 z-[9999]">
+        <div className="w-12 h-12 border-4 border-border border-t-primary rounded-full animate-spin" />
+        <span className="font-orbitron text-primary text-lg">
+          {status === 'found' ? 'Match Found! Launching...' : 'Searching for opponents...'}
+        </span>
+        {status === 'searching' && (
+          <button
+            onClick={leaveQueue}
+            className="mt-4 px-6 py-2 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors font-orbitron text-sm"
+          >
+            CANCEL SEARCH
+          </button>
+        )}
+      </div>
+    )}
     <TopBar />
 
     {/* Float buttons for mobile */}

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useGameSession, TeamSize } from '@/hooks/useGameSession';
 import { useAuth } from '@/contexts/AuthContext';
+import { useGame } from '@/contexts/GameContext';
 import { Terminal, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 declare global {
@@ -50,6 +51,7 @@ const Game: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
+  const { settings } = useGame();
 
   // Get match parameters from URL
   const matchId = searchParams.get('matchId') || undefined;
@@ -94,6 +96,47 @@ const Game: React.FC = () => {
   const addLog = useCallback((msg: string) => {
     setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
   }, []);
+
+  // Audio Instance - specific to this Game component lifecycle
+  const [audio] = useState(() => {
+    const a = new Audio('/game-music.mp3');
+    a.loop = true;
+    return a;
+  });
+
+  // Handle Play/Pause and Volume
+  useEffect(() => {
+    audio.volume = settings.musicVolume / 100;
+
+    if (settings.bgmEnabled) {
+      // Only play if not already playing
+      if (audio.paused) {
+        audio.play().catch(error => {
+          console.error("Audio play failed:", error);
+          // Handle Autoplay restrictions
+          if (error.name === 'NotAllowedError') {
+            toast.error("Auto-play blocked. Click anywhere to update!", {
+              action: {
+                label: "Play Music",
+                onClick: () => audio.play()
+              },
+              duration: 5000,
+            });
+          } else if (error.name === 'NotSupportedError') {
+            toast.error("Audio format not supported.");
+          }
+        });
+      }
+    } else {
+      audio.pause();
+    }
+
+    // Cleanup on unmount
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [audio, settings.bgmEnabled, settings.musicVolume]);
 
   // Initialize Pyodide
   useEffect(() => {

@@ -21,6 +21,12 @@ interface GameSessionState {
   isRunning: boolean;
   sabotagesUnlocked: boolean;
   isMyTurn: boolean;
+  _raw?: {
+    startedAt: string | null;
+    myPenalties: number;
+    enemyPenalties: number;
+    isTeamA: boolean;
+  };
 }
 
 // Match duration based on team size (in seconds)
@@ -44,7 +50,7 @@ export const useGameSession = (matchId?: string) => {
     sabotagesUnlocked: false,
     isMyTurn: true,
   });
-  
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Calculate if sabotages are unlocked (after half-time)
@@ -52,6 +58,17 @@ export const useGameSession = (matchId?: string) => {
     const halfTime = totalTime / 2;
     const elapsedTime = totalTime - currentTime;
     return elapsedTime >= halfTime;
+  }, []);
+
+  // Calculate time remaining based on server state
+  const calculateTimeRemaining = useCallback((matchDuration: number, startedAt: string | null, penalties: number) => {
+    if (!startedAt) return matchDuration;
+
+    const startTime = new Date(startedAt).getTime();
+    const now = new Date().getTime();
+    const elapsedSeconds = Math.floor((now - startTime) / 1000);
+
+    return Math.max(0, matchDuration - elapsedSeconds - penalties);
   }, []);
 
   // Load match data and team members
@@ -100,18 +117,67 @@ export const useGameSession = (matchId?: string) => {
         };
       });
 
-      setGameState((prev) => ({
-        ...prev,
-        matchId,
-        teamSize,
-        myTeam,
-        enemyTeam,
-        myTeamTime: matchDuration,
-        enemyTeamTime: matchDuration,
-        matchDuration,
-      }));
+      setGameState((prev) => {
+        // Calculate initial times
+        const data = matchData as any; // Cast to any to access new columns until types are regenerated
+        const myPenalties = isTeamA ? (data.team_a_penalties || 0) : (data.team_b_penalties || 0);
+        const enemyPenalties = isTeamA ? (data.team_b_penalties || 0) : (data.team_a_penalties || 0);
+
+        const myTime = calculateTimeRemaining(matchDuration, matchData.started_at, myPenalties);
+        const enemyTime = calculateTimeRemaining(matchDuration, matchData.started_at, enemyPenalties);
+
+        return {
+          ...prev,
+          matchId,
+          teamSize,
+          myTeam,
+          enemyTeam,
+          myTeamTime: myTime,
+          enemyTeamTime: enemyTime,
+          matchDuration,
+          isRunning: matchData.status === 'in_progress',
+          // Store raw values for potential recalculation
+          _raw: {
+            startedAt: matchData.started_at,
+            myPenalties,
+            enemyPenalties,
+            isTeamA
+          }
+        };
+      });
+
+      // Subscribe to Realtime Updates
+      const channel = supabase
+        .channel(`match-${matchId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'matches',
+            filter: `id=eq.${matchId}`,
+          },
+          (payload) => {
+            const newData = payload.new;
+            setGameState((prev) => {
+              const isTeamA = prev._raw?.isTeamA;
+              const myPenalties = isTeamA ? newData.team_a_penalties : newData.team_b_penalties;
+              const enemyPenalties = isTeamA ? newData.team_b_penalties : newData.team_a_penalties;
+
+              return {
+                ...prev,
+                _raw: { ...prev._raw, myPenalties, enemyPenalties }
+              };
+            });
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
-  }, [matchId, user]);
+  }, [matchId, user, calculateTimeRemaining]);
 
   // Initialize with team size for demo/practice mode
   const initializeDemo = useCallback((teamSize: TeamSize) => {
@@ -152,20 +218,42 @@ export const useGameSession = (matchId?: string) => {
   }, []);
 
   // Deduct time from my team (for sabotage cost)
-  const deductMyTime = useCallback((seconds: number) => {
+  const deductMyTime = useCallback(async (seconds: number) => {
+    // Optimistic update
     setGameState((prev) => ({
       ...prev,
       myTeamTime: Math.max(0, prev.myTeamTime - seconds),
     }));
-  }, []);
+
+    if (matchId && gameState._raw) {
+      const teamSide = gameState._raw.isTeamA ? 'a' : 'b';
+      // Cast to any to bypass type check until types are regenerated
+      await (supabase.rpc as any)('apply_penalty', {
+        match_id_param: matchId,
+        team_side: teamSide,
+        amount: seconds
+      });
+    }
+  }, [matchId, gameState._raw]);
 
   // Deduct time from enemy team (for successful attacks)
-  const deductEnemyTime = useCallback((seconds: number) => {
+  const deductEnemyTime = useCallback(async (seconds: number) => {
+    // Optimistic update
     setGameState((prev) => ({
       ...prev,
       enemyTeamTime: Math.max(0, prev.enemyTeamTime - seconds),
     }));
-  }, []);
+
+    if (matchId && gameState._raw) {
+      const teamSide = gameState._raw.isTeamA ? 'b' : 'a'; // Opposite team
+      // Cast to any to bypass type check until types are regenerated
+      await (supabase.rpc as any)('apply_penalty', {
+        match_id_param: matchId,
+        team_side: teamSide,
+        amount: seconds
+      });
+    }
+  }, [matchId, gameState._raw]);
 
   // Timer effect
   useEffect(() => {
@@ -177,7 +265,7 @@ export const useGameSession = (matchId?: string) => {
             Math.min(newMyTime, prev.enemyTeamTime),
             prev.matchDuration
           );
-          
+
           return {
             ...prev,
             myTeamTime: Math.max(0, newMyTime),

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -11,11 +11,23 @@ export const useMatchmaking = () => {
   const [status, setStatus] = useState<MatchStatus>('idle');
   const [matchId, setMatchId] = useState<string | null>(null);
   const [queueId, setQueueId] = useState<string | null>(null);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Subscribe to queue updates (if someone matches with us)
+  // Helper to handle match found (prevents duplicate navigation)
+  const handleMatchFound = useCallback((foundMatchId: string) => {
+    setMatchId((prev) => {
+      if (prev) return prev; // Already found, don't re-trigger
+      toast.success('Match Found! Entering arena...');
+      return foundMatchId;
+    });
+    setStatus('found');
+  }, []);
+
+  // Subscribe to queue updates (Realtime) + Polling Fallback
   useEffect(() => {
     if (!queueId) return;
 
+    // --- Realtime subscription (fast path) ---
     const channel = supabase
       .channel(`queue-${queueId}`)
       .on(
@@ -27,20 +39,56 @@ export const useMatchmaking = () => {
           filter: `id=eq.${queueId}`,
         },
         (payload) => {
-          console.log('Queue update:', payload);
+          console.log('Queue update (Realtime):', payload);
           if (payload.new.status === 'matched' && payload.new.match_id) {
-            setMatchId(payload.new.match_id);
-            setStatus('found');
-            toast.success('Match Found! Entering arena...');
+            handleMatchFound(payload.new.match_id);
           }
         }
       )
       .subscribe();
 
+    // --- Polling fallback (every 3s) ---
+    // Polls 1) The queue for status updates
+    // Polls 2) The MATCHES table directly (in case RLS blocked the queue update)
+    pollRef.current = setInterval(async () => {
+      // Check Queue (Fast check)
+      const { data: queueData } = await supabase
+        .from('matchmaking_queue')
+        .select('status, match_id')
+        .eq('id', queueId)
+        .single();
+
+      if (queueData?.status === 'matched' && queueData?.match_id) {
+        console.log('Match found via Queue poll:', queueData);
+        handleMatchFound(queueData.match_id);
+        return;
+      }
+
+      // Check Matches table (Deep check - robustness against RLS)
+      // "Find a match where (team_a has me OR team_b has me) AND status is in_progress"
+      const { data: matchData } = await supabase
+        .from('matches')
+        .select('id')
+        .or(`team_a.cs.{${user.id}},team_b.cs.{${user.id}}`)
+        .eq('status', 'in_progress')
+        .gt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString()) // Created in last 2 mins
+        .limit(1)
+        .single();
+
+      if (matchData) {
+        console.log('Match found via Matches table poll:', matchData);
+        handleMatchFound(matchData.id);
+      }
+    }, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-  }, [queueId]);
+  }, [queueId, handleMatchFound]);
 
   const joinQueue = useCallback(async (mode: GameMode, teamSize: number) => {
     if (!user) {
@@ -52,8 +100,21 @@ export const useMatchmaking = () => {
     setMatchId(null);
 
     try {
-      // 1. Check if ANYONE is waiting in the queue (simple FIFO for now)
-      // ignoring rank for now to ensure matching works easily
+      // 0. Clean up MY old queue entries first (from previous sessions/crashes)
+      await supabase
+        .from('matchmaking_queue')
+        .delete()
+        .eq('user_id', user.id);
+
+      // 1. Purge ALL stale entries older than 2 minutes (ghost prevention)
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      await supabase
+        .from('matchmaking_queue')
+        .delete()
+        .eq('status', 'waiting')
+        .lt('created_at', twoMinutesAgo);
+
+      // 2. Search for a FRESH waiting opponent
       const { data: opponents, error: searchError } = await supabase
         .from('matchmaking_queue')
         .select('*')
@@ -61,6 +122,7 @@ export const useMatchmaking = () => {
         .eq('team_size', teamSize)
         .eq('status', 'waiting')
         .neq('user_id', user.id) // Don't match with self
+        .gte('created_at', twoMinutesAgo) // Only fresh entries
         .limit(1);
 
       if (searchError) throw searchError;
@@ -86,10 +148,15 @@ export const useMatchmaking = () => {
         if (matchError) throw matchError;
 
         // B. Update opponent's queue status -> matched
-        await supabase
+        const { error: updateError } = await supabase
           .from('matchmaking_queue')
           .update({ status: 'matched', match_id: match.id })
           .eq('id', opponent.id);
+
+        if (updateError) {
+          console.error('Failed to update opponent queue status (RLS?):', updateError);
+          // We continue anyway, because the polling fallback will catch it!
+        }
 
         // C. Set my status -> found
         setMatchId(match.id);
@@ -98,12 +165,6 @@ export const useMatchmaking = () => {
 
       } else {
         // --- NO OPPONENT. JOIN THE QUEUE ---
-        // Clean up any old queue entries first
-        await supabase
-          .from('matchmaking_queue')
-          .delete()
-          .eq('user_id', user.id);
-
         const { data: entry, error: queueError } = await supabase
           .from('matchmaking_queue')
           .insert({
