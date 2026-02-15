@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from './AuthContext';
 
 export interface Friend {
   name: string;
@@ -87,8 +89,76 @@ const defaultSettings: Settings = {
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [gameData, setGameData] = useState<GameData>(defaultGameData);
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [settings, setSettings] = useState<Settings>(() => {
+    // Load from local storage if available
+    const saved = localStorage.getItem('codezone_settings');
+    return saved ? JSON.parse(saved) : defaultSettings;
+  });
+
+  // Save settings to local storage whenever they change
+  useEffect(() => {
+    localStorage.setItem('codezone_settings', JSON.stringify(settings));
+  }, [settings]);
+
+  // Fetch initial data
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchProfile = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data && !error) {
+        setGameData(prev => ({
+          ...prev,
+          username: data.username || prev.username,
+          level: data.level || prev.level,
+          xpPercent: data.xp ? (data.xp % 100) : prev.xpPercent,
+          coins: data.coins || prev.coins,
+          gems: data.gems || prev.gems,
+          rank: data.rank || prev.rank,
+          stats: {
+            ...prev.stats,
+            matches: data.total_matches || 0,
+            wins: data.total_wins || 0,
+            // Calculate win rate
+            winRate: data.total_matches > 0
+              ? Math.round((data.total_wins / data.total_matches) * 100)
+              : 0
+          }
+        }));
+      }
+    };
+
+    fetchProfile();
+
+    // Realtime subscription
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Realtime update:', payload);
+          fetchProfile(); // Re-fetch on any change
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const updateGameData = (data: Partial<GameData>) => {
     setGameData((prev) => ({ ...prev, ...data }));

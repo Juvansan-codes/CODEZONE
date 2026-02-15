@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -15,6 +15,9 @@ import { Loader2 } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || '/lobby';
+
   const { signIn, user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [domain, setDomain] = useState('');
@@ -24,23 +27,23 @@ const Login: React.FC = () => {
   // Redirect if already logged in
   useEffect(() => {
     if (user && !authLoading) {
-      navigate('/lobby');
+      navigate(from, { replace: true });
     }
-  }, [user, authLoading, navigate]);
+  }, [user, authLoading, navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email.trim()) {
       toast.error('Please enter your email');
       return;
     }
-    
+
     if (!domain) {
       toast.error('Please select your domain');
       return;
     }
-    
+
     if (!password) {
       toast.error('Please enter your password');
       return;
@@ -56,7 +59,7 @@ const Login: React.FC = () => {
 
     try {
       const { error } = await signIn(fullEmail, password);
-      
+
       if (error) {
         if (error.message.includes('Invalid login credentials')) {
           toast.error('Invalid email or password. Please try again.');
@@ -70,7 +73,7 @@ const Login: React.FC = () => {
       }
 
       toast.success('Welcome back, soldier!');
-      navigate('/lobby');
+      navigate(from, { replace: true });
     } catch (err) {
       toast.error('An unexpected error occurred. Please try again.');
     } finally {
@@ -141,8 +144,8 @@ const Login: React.FC = () => {
             />
           </div>
 
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             className="w-full gradient-primary text-primary-foreground font-bold py-3"
             disabled={isLoading}
           >

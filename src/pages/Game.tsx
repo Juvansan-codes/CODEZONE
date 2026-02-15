@@ -4,6 +4,13 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useGameSession, TeamSize } from '@/hooks/useGameSession';
 import { useAuth } from '@/contexts/AuthContext';
+import { Terminal, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+
+declare global {
+  interface Window {
+    loadPyodide: any;
+  }
+}
 
 const RANKS = [
   'Bronze Techie', 'Silver Debugger', 'Gold Architect', 'Platinum Engineer',
@@ -11,9 +18,9 @@ const RANKS = [
 ];
 
 const QUESTIONS = [
-  { title: 'Reverse String', description: 'Write a function to reverse a string' },
-  { title: 'Palindrome Check', description: 'Check if string is palindrome' },
-  { title: 'Two Sum', description: 'Return indices that sum to target' },
+  { title: 'Reverse String', description: 'Write a python function to reverse a string' },
+  { title: 'Palindrome Check', description: 'Check if string is palindrome in Python' },
+  { title: 'Two Sum', description: 'Return indices that sum to target using Python' },
 ];
 
 // Sabotage costs in seconds
@@ -43,18 +50,18 @@ const Game: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
-  
+
   // Get match parameters from URL
   const matchId = searchParams.get('matchId') || undefined;
   const teamSizeParam = parseInt(searchParams.get('teamSize') || '5') as TeamSize;
-  
-  const { 
-    gameState, 
-    startGame, 
-    stopGame, 
-    deductMyTime, 
-    deductEnemyTime, 
-    initializeDemo 
+
+  const {
+    gameState,
+    startGame,
+    stopGame,
+    deductMyTime,
+    deductEnemyTime,
+    initializeDemo
   } = useGameSession(matchId);
 
   const [wins, setWins] = useState(0);
@@ -65,17 +72,20 @@ const Game: React.FC = () => {
     fog: false, invert: false, shake: false
   });
   const [memeCooldown, setMemeCooldown] = useState(false);
+  const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
+  const [isPyodideReady, setIsPyodideReady] = useState(false);
+  const [pyodide, setPyodide] = useState<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
   // Initialize game on mount
   useEffect(() => {
     setQuestion(QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)]);
-    
+
     if (!matchId) {
       // Demo mode - use team size from URL params
       initializeDemo(teamSizeParam);
     }
-    
+
     // Start the game after a short delay
     const timer = setTimeout(() => startGame(), 1000);
     return () => clearTimeout(timer);
@@ -84,6 +94,27 @@ const Game: React.FC = () => {
   const addLog = useCallback((msg: string) => {
     setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
   }, []);
+
+  // Initialize Pyodide
+  useEffect(() => {
+    const initPyodide = async () => {
+      try {
+        if (window.loadPyodide) {
+          const pyodideInstance = await window.loadPyodide();
+          setPyodide(pyodideInstance);
+          setIsPyodideReady(true);
+          addLog('Python environment loaded successfully');
+        } else {
+          // Retry if script hasn't loaded yet
+          setTimeout(initPyodide, 500);
+        }
+      } catch (err) {
+        console.error('Failed to load Pyodide', err);
+        addLog('Failed to load Python environment');
+      }
+    };
+    initPyodide();
+  }, [addLog]);
 
   const checkEnd = useCallback(() => {
     if (gameState.enemyTeamTime <= 0) {
@@ -101,10 +132,33 @@ const Game: React.FC = () => {
     checkEnd();
   }, [gameState.myTeamTime, gameState.enemyTeamTime, checkEnd]);
 
-  const runCode = () => {
-    deductEnemyTime(10);
-    toast.success('🔥 ENEMY LOST 10s');
-    addLog('Run successful — chip damage dealt');
+  const runCode = async () => {
+    setConsoleOutput([]); // Clear previous output
+
+    if (!pyodide || !isPyodideReady) {
+      toast.error('⏳ Python is still loading...');
+      return;
+    }
+
+    try {
+      // Capture stdout
+      pyodide.setStdout({
+        batched: (msg: string) => {
+          setConsoleOutput(prev => [...prev, { type: 'log', content: msg }]);
+        }
+      });
+
+      // Execute Python code
+      await pyodide.runPythonAsync(code);
+
+      deductEnemyTime(10);
+      toast.success('🔥 EXECUTION SUCCESSFUL - Enemy -10s');
+      addLog('Python code ran successfully');
+
+    } catch (err: any) {
+      setConsoleOutput(prev => [...prev, { type: 'error', content: err.toString() }]);
+      toast.error('❌ RUNTIME ERROR');
+    }
   };
 
   const submitCode = () => {
@@ -122,12 +176,12 @@ const Game: React.FC = () => {
     }
 
     const cost = SABOTAGE_COSTS[type];
-    
+
     if (gameState.myTeamTime < cost) {
       toast.error(`⏱ Not enough time! Need ${formatTimeVerbose(cost)}`);
       return;
     }
-    
+
     deductMyTime(cost);
     addLog(`Used ${type.toUpperCase()} sabotage — cost ${formatTimeVerbose(cost)}`);
 
@@ -135,7 +189,7 @@ const Game: React.FC = () => {
     setTimeout(() => {
       setSabotageEffects((prev) => ({ ...prev, [type]: false }));
     }, type === 'shake' ? 500 : 4000);
-    
+
     toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
   };
 
@@ -144,14 +198,14 @@ const Game: React.FC = () => {
       toast.error('⏳ Sabotages unlock at halftime!');
       return;
     }
-    
+
     if (memeCooldown) {
       toast.error('⏳ Meme Nuke recharging');
       return;
     }
-    
+
     const cost = SABOTAGE_COSTS.memeNuke;
-    
+
     if (gameState.myTeamTime < cost) {
       toast.error(`⏱ Not enough time! Need ${formatTimeVerbose(cost)}`);
       return;
@@ -180,11 +234,11 @@ const Game: React.FC = () => {
   };
 
   const currentRank = RANKS[Math.min(wins, RANKS.length - 1)];
-  
+
   // Calculate progress percentages
   const myTimePercent = (gameState.myTeamTime / gameState.matchDuration) * 100;
   const enemyTimePercent = (gameState.enemyTeamTime / gameState.matchDuration) * 100;
-  
+
   // Calculate halftime status
   const halfwayPoint = gameState.matchDuration / 2;
   const elapsedTime = gameState.matchDuration - gameState.myTeamTime;
@@ -249,13 +303,12 @@ const Game: React.FC = () => {
               </div>
               <div className="h-3 bg-black/50 rounded-full overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-300 ${
-                    myTimePercent > 50 
-                      ? 'bg-gradient-to-r from-primary to-primary/70' 
-                      : myTimePercent > 25 
-                        ? 'bg-gradient-to-r from-gold to-gold/80' 
-                        : 'bg-gradient-to-r from-accent to-accent/70'
-                  }`}
+                  className={`h-full transition-all duration-300 ${myTimePercent > 50
+                    ? 'bg-gradient-to-r from-primary to-primary/70'
+                    : myTimePercent > 25
+                      ? 'bg-gradient-to-r from-gold to-gold/80'
+                      : 'bg-gradient-to-r from-accent to-accent/70'
+                    }`}
                   style={{ width: `${myTimePercent}%` }}
                 />
               </div>
@@ -278,14 +331,14 @@ const Game: React.FC = () => {
           {/* Sabotages */}
           <div className="glass-panel p-4">
             <h3 className="font-bold mb-3">
-              SABOTAGES 😈 
+              SABOTAGES 😈
               {!gameState.sabotagesUnlocked && (
                 <span className="text-xs text-muted-foreground ml-2">🔒 Halftime</span>
               )}
             </h3>
             <div className="space-y-2">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
                 onClick={() => useSabotage('fog')}
                 disabled={!gameState.sabotagesUnlocked}
@@ -293,8 +346,8 @@ const Game: React.FC = () => {
                 <span>🌫 Fog</span>
                 <span className="text-xs text-muted-foreground">{formatTimeVerbose(SABOTAGE_COSTS.fog)}</span>
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
                 onClick={() => useSabotage('invert')}
                 disabled={!gameState.sabotagesUnlocked}
@@ -302,8 +355,8 @@ const Game: React.FC = () => {
                 <span>🔄 Invert</span>
                 <span className="text-xs text-muted-foreground">{formatTimeVerbose(SABOTAGE_COSTS.invert)}</span>
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className={`w-full justify-between ${!gameState.sabotagesUnlocked ? 'opacity-50' : ''}`}
                 onClick={() => useSabotage('shake')}
                 disabled={!gameState.sabotagesUnlocked}
@@ -336,27 +389,56 @@ const Game: React.FC = () => {
             <p className="text-sm text-muted-foreground">{question.description}</p>
           </div>
 
-          <div className="relative mb-3">
+          <div className="relative mb-3 flex-1 flex flex-col gap-3">
             <textarea
               ref={editorRef}
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              className={`w-full h-[350px] md:h-[400px] bg-[#1e1e1e] border border-border rounded-xl p-4 font-mono text-sm text-green-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary ${
-                sabotageEffects.invert ? 'invert hue-rotate-180' : ''
-              }`}
+              className={`w-full h-[300px] bg-[#1e1e1e] border border-border rounded-xl p-4 font-mono text-sm text-green-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''
+                }`}
               spellCheck={false}
+              placeholder="# Write your Python solution here..."
             />
+
+            {/* Console Output Panel */}
+            <div className="bg-[#0c0c0c] border border-border rounded-xl p-3 h-[150px] overflow-y-auto font-mono text-xs">
+              <div className="flex items-center gap-2 text-muted-foreground mb-2 border-b border-white/10 pb-1 justify-between">
+                <div className="flex items-center gap-2">
+                  <Terminal size={14} />
+                  <span>PYTHON CONSOLE OUTPUT</span>
+                </div>
+                {!isPyodideReady && (
+                  <span className="flex items-center gap-1 text-accent text-[10px]">
+                    <Loader2 className="animate-spin w-3 h-3" /> Loading Python...
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1">
+                {consoleOutput.length === 0 ? (
+                  <div className="text-white/20 italic">Ready to execute...</div>
+                ) : (
+                  consoleOutput.map((log, i) => (
+                    <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-500' :
+                      log.type === 'warn' ? 'text-yellow-500' : 'text-green-300'
+                      }`}>
+                      <span className="opacity-50 select-none">{'>'}</span>
+                      <pre className="whitespace-pre-wrap font-inherit">{log.content}</pre>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={runCode} className="bg-primary hover:bg-primary/80">
-              RUN
+            <Button onClick={runCode} className="bg-primary hover:bg-primary/80 gap-2">
+              <Play size={16} fill="currentColor" /> RUN CODE
             </Button>
-            <Button onClick={submitCode} className="bg-gold text-gold-foreground hover:bg-gold/80">
-              SUBMIT
+            <Button onClick={submitCode} className="bg-gold text-gold-foreground hover:bg-gold/80 gap-2">
+              <CheckCircle2 size={16} /> SUBMIT
             </Button>
-            <Button variant="outline" onClick={handleExitMatch}>
-              Exit Match
+            <Button variant="outline" onClick={handleExitMatch} className="gap-2">
+              <XCircle size={16} /> Exit
             </Button>
           </div>
         </main>

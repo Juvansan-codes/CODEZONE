@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trophy, Medal, Award, TrendingUp, Users, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,22 +11,9 @@ interface Player {
   score: number;
   wins: number;
   matches: number;
-  streak: number;
+  streak?: number;
   tier: string;
 }
-
-const mockPlayers: Player[] = [
-  { rank: 1, name: 'NexusKiller', score: 15420, wins: 87, matches: 102, streak: 12, tier: 'Hacker Legend' },
-  { rank: 2, name: 'CodePhantom', score: 14890, wins: 82, matches: 98, streak: 8, tier: 'Cyber Overlord' },
-  { rank: 3, name: 'ByteStorm', score: 14250, wins: 79, matches: 95, streak: 5, tier: 'Cyber Overlord' },
-  { rank: 4, name: 'ShadowCoder', score: 13800, wins: 75, matches: 92, streak: 4, tier: 'Elite Exploiter' },
-  { rank: 5, name: 'AlgoMaster', score: 13200, wins: 71, matches: 88, streak: 3, tier: 'Elite Exploiter' },
-  { rank: 6, name: 'DebugNinja', score: 12650, wins: 68, matches: 85, streak: 2, tier: 'Shadow Coder' },
-  { rank: 7, name: 'DataDragon', score: 12100, wins: 65, matches: 82, streak: 1, tier: 'Shadow Coder' },
-  { rank: 8, name: 'CyberWolf', score: 11500, wins: 61, matches: 78, streak: 0, tier: 'Platinum Engineer' },
-  { rank: 9, name: 'BinaryBeast', score: 10900, wins: 58, matches: 75, streak: 3, tier: 'Platinum Engineer' },
-  { rank: 10, name: 'LogicLord', score: 10400, wins: 55, matches: 72, streak: 1, tier: 'Gold Architect' },
-];
 
 const getRankIcon = (rank: number) => {
   if (rank === 1) return <Trophy className="text-yellow-400" size={24} />;
@@ -44,6 +32,39 @@ const getRankColor = (rank: number) => {
 const Leaderboard: React.FC = () => {
   const navigate = useNavigate();
   const [timeframe, setTimeframe] = useState('weekly');
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      setLoading(true);
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('total_wins', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('Error fetching leaderboard:', error);
+      } else if (data) {
+        const formattedPlayers: Player[] = data.map((profile, index) => ({
+          rank: index + 1,
+          name: profile.username || 'Unknown',
+          score: profile.xp || 0,
+          wins: profile.total_wins || 0,
+          matches: profile.total_matches || 0,
+          streak: 0, // Streak logic pending
+          tier: profile.rank || 'Novice'
+        }));
+        setPlayers(formattedPlayers);
+      }
+
+      setLoading(false);
+    };
+
+    fetchLeaderboard();
+  }, []);
 
   return (
     <div className="min-h-screen">
@@ -96,27 +117,30 @@ const Leaderboard: React.FC = () => {
 
         {/* Top 3 Highlight */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          {mockPlayers.slice(0, 3).map((player, index) => (
-            <div
-              key={player.rank}
-              className={`glass-panel p-6 text-center ${index === 0 ? 'md:order-2 md:scale-105' : index === 1 ? 'md:order-1' : 'md:order-3'}`}
-            >
-              <div className="mb-4">
-                {player.rank === 1 && <Trophy className="mx-auto text-yellow-400" size={48} />}
-                {player.rank === 2 && <Medal className="mx-auto text-gray-300" size={40} />}
-                {player.rank === 3 && <Award className="mx-auto text-orange-400" size={40} />}
+          {loading ? (
+            <div className="col-span-3 text-center py-10">Loading champions...</div>
+          ) : (
+            players.slice(0, 3).map((player, index) => (
+              <div
+                key={player.rank}
+                className={`glass-panel p-6 text-center ${index === 0 ? 'md:order-2 md:scale-105' : index === 1 ? 'md:order-1' : 'md:order-3'}`}
+              >
+                <div className="mb-4">
+                  {player.rank === 1 && <Trophy className="mx-auto text-yellow-400" size={48} />}
+                  {player.rank === 2 && <Medal className="mx-auto text-gray-300" size={40} />}
+                  {player.rank === 3 && <Award className="mx-auto text-orange-400" size={40} />}
+                </div>
+                <h3 className="font-orbitron font-bold text-lg mb-1">{player.name}</h3>
+                <p className="text-sm text-muted-foreground mb-3">{player.tier}</p>
+                <p className="text-2xl font-bold text-primary">{player.score.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">points</p>
+                <div className="flex justify-center gap-4 mt-4 text-sm">
+                  <span>{player.wins} W</span>
+                  <span className="text-muted-foreground">|</span>
+                  <span>{player.matches - player.wins} L</span>
+                </div>
               </div>
-              <h3 className="font-orbitron font-bold text-lg mb-1">{player.name}</h3>
-              <p className="text-sm text-muted-foreground mb-3">{player.tier}</p>
-              <p className="text-2xl font-bold text-primary">{player.score.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">points</p>
-              <div className="flex justify-center gap-4 mt-4 text-sm">
-                <span>{player.wins} W</span>
-                <span className="text-muted-foreground">|</span>
-                <span>{player.matches - player.wins} L</span>
-              </div>
-            </div>
-          ))}
+            ))}
         </div>
 
         {/* Full Leaderboard */}
@@ -124,7 +148,7 @@ const Leaderboard: React.FC = () => {
           <div className="p-4 border-b border-border">
             <h2 className="font-orbitron font-bold text-primary">Rankings</h2>
           </div>
-          
+
           {/* Table Header */}
           <div className="hidden md:grid grid-cols-12 gap-4 px-4 py-3 bg-surface/50 text-sm text-muted-foreground font-semibold">
             <div className="col-span-1">Rank</div>
@@ -137,7 +161,7 @@ const Leaderboard: React.FC = () => {
 
           {/* Player Rows */}
           <div className="divide-y divide-border/50">
-            {mockPlayers.map((player) => (
+            {players.map((player) => (
               <div
                 key={player.rank}
                 className={`grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 p-4 items-center transition-colors hover:bg-white/5 ${getRankColor(player.rank)} border-l-4`}

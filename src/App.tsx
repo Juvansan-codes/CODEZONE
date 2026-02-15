@@ -20,6 +20,9 @@ import Analytics from "./pages/Analytics";
 import Challenges from "./pages/Challenges";
 import NotFound from "./pages/NotFound";
 
+
+import ProtectedRoute from "@/components/ProtectedRoute";
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -35,13 +38,44 @@ const App = () => (
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Registration />} />
               <Route path="/otp" element={<OtpVerification />} />
-              <Route path="/lobby" element={<Lobby />} />
-              <Route path="/game" element={<Game />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/leaderboard" element={<Leaderboard />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/challenges" element={<Challenges />} />
+
+              {/* Protected Routes */}
+              <Route path="/lobby" element={
+                <ProtectedRoute>
+                  <Lobby />
+                </ProtectedRoute>
+              } />
+              <Route path="/game" element={
+                <ProtectedRoute>
+                  <Game />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/settings" element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              } />
+              <Route path="/leaderboard" element={
+                <ProtectedRoute>
+                  <Leaderboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/analytics" element={
+                <ProtectedRoute>
+                  <Analytics />
+                </ProtectedRoute>
+              } />
+              <Route path="/challenges" element={
+                <ProtectedRoute>
+                  <Challenges />
+                </ProtectedRoute>
+              } />
+
               <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
