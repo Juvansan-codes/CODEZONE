@@ -1,79 +1,38 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 
-type GameMode = 'campaign' | 'duel' | 'practice';
-type TeamSize = 1 | 3 | 5;
-type QueueStatus = 'idle' | 'searching' | 'matched' | 'error';
-
-interface QueueEntry {
-  id: string;
-  user_id: string;
-  game_mode: string;
-  team_size: number;
-  status: string;
-  match_id: string | null;
-  created_at: string;
-}
-
-interface Match {
-  id: string;
-  game_mode: string;
-  team_size: number;
-  status: string;
-  team_a: string[];
-  team_b: string[];
-}
+type GameMode = 'duel' | 'campaign' | 'practice';
+type MatchStatus = 'idle' | 'searching' | 'found' | 'error';
 
 export const useMatchmaking = () => {
-  const { user, profile } = useAuth();
-  const [queueStatus, setQueueStatus] = useState<QueueStatus>('idle');
-  const [queueEntry, setQueueEntry] = useState<QueueEntry | null>(null);
-  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
-  const [playersInQueue, setPlayersInQueue] = useState(0);
-  const [searchTime, setSearchTime] = useState(0);
+  const { user } = useAuth();
+  const [status, setStatus] = useState<MatchStatus>('idle');
+  const [matchId, setMatchId] = useState<string | null>(null);
+  const [queueId, setQueueId] = useState<string | null>(null);
 
-  // Subscribe to queue changes
+  // Subscribe to queue updates (if someone matches with us)
   useEffect(() => {
-    if (!user) return;
+    if (!queueId) return;
 
     const channel = supabase
-      .channel('matchmaking')
+      .channel(`queue-${queueId}`)
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'UPDATE',
           schema: 'public',
           table: 'matchmaking_queue',
+          filter: `id=eq.${queueId}`,
         },
-        async (payload) => {
-          // Check if our queue entry was matched
-          if (payload.new && (payload.new as QueueEntry).user_id === user.id) {
-            const entry = payload.new as QueueEntry;
-            setQueueEntry(entry);
-            
-            if (entry.status === 'matched' && entry.match_id) {
-              setQueueStatus('matched');
-              // Fetch the match details
-              const { data: matchData } = await supabase
-                .from('matches')
-                .select('*')
-                .eq('id', entry.match_id)
-                .single();
-              
-              if (matchData) {
-                setCurrentMatch(matchData as Match);
-              }
-            }
+        (payload) => {
+          console.log('Queue update:', payload);
+          if (payload.new.status === 'matched' && payload.new.match_id) {
+            setMatchId(payload.new.match_id);
+            setStatus('found');
+            toast.success('Match Found! Entering arena...');
           }
-          
-          // Update player count in queue
-          const { count } = await supabase
-            .from('matchmaking_queue')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'waiting');
-          
-          setPlayersInQueue(count || 0);
         }
       )
       .subscribe();
@@ -81,146 +40,115 @@ export const useMatchmaking = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [queueId]);
 
-  // Timer for search time
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (queueStatus === 'searching') {
-      interval = setInterval(() => {
-        setSearchTime((prev) => prev + 1);
-      }, 1000);
-    } else {
-      setSearchTime(0);
+  const joinQueue = useCallback(async (mode: GameMode, teamSize: number) => {
+    if (!user) {
+      toast.error('You must be logged in to play.');
+      return;
     }
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [queueStatus]);
+    setStatus('searching');
+    setMatchId(null);
 
-  const joinQueue = useCallback(async (gameMode: GameMode, teamSize: TeamSize) => {
-    if (!user || !profile) return { error: new Error('Not authenticated') };
+    try {
+      // 1. Check if ANYONE is waiting in the queue (simple FIFO for now)
+      // ignoring rank for now to ensure matching works easily
+      const { data: opponents, error: searchError } = await supabase
+        .from('matchmaking_queue')
+        .select('*')
+        .eq('game_mode', mode)
+        .eq('team_size', teamSize)
+        .eq('status', 'waiting')
+        .neq('user_id', user.id) // Don't match with self
+        .limit(1);
 
-    // First, cancel any existing queue entries
-    await supabase
-      .from('matchmaking_queue')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('status', 'waiting');
+      if (searchError) throw searchError;
 
-    // Insert new queue entry
-    const { data, error } = await supabase
-      .from('matchmaking_queue')
-      .insert({
-        user_id: user.id,
-        game_mode: gameMode,
-        team_size: teamSize,
-        rank_tier: profile.rank,
-        status: 'waiting',
-      })
-      .select()
-      .single();
+      if (opponents && opponents.length > 0) {
+        // --- FOUND AN OPPONENT! MATCH THEM! ---
+        const opponent = opponents[0];
 
-    if (error) {
-      setQueueStatus('error');
-      return { error };
-    }
+        // A. Create the match
+        const { data: match, error: matchError } = await supabase
+          .from('matches')
+          .insert({
+            game_mode: mode,
+            team_size: teamSize,
+            status: 'in_progress',
+            team_a: [opponent.user_id], // Opponent is Team A (waiting longer)
+            team_b: [user.id],          // I am Team B
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
 
-    setQueueEntry(data as QueueEntry);
-    setQueueStatus('searching');
+        if (matchError) throw matchError;
 
-    // Try to find a match
-    await tryMatchPlayers(gameMode, teamSize);
-
-    return { error: null };
-  }, [user, profile]);
-
-  const tryMatchPlayers = async (gameMode: GameMode, teamSize: TeamSize) => {
-    // Get all waiting players for this mode and team size
-    const { data: waitingPlayers } = await supabase
-      .from('matchmaking_queue')
-      .select('*')
-      .eq('game_mode', gameMode)
-      .eq('team_size', teamSize)
-      .eq('status', 'waiting')
-      .order('created_at', { ascending: true });
-
-    if (!waitingPlayers) return;
-
-    const requiredPlayers = teamSize * 2; // e.g., 5v5 needs 10 players
-
-    if (waitingPlayers.length >= requiredPlayers) {
-      // We have enough players! Create a match
-      const matchPlayers = waitingPlayers.slice(0, requiredPlayers);
-      const teamA = matchPlayers.slice(0, teamSize).map((p) => p.user_id);
-      const teamB = matchPlayers.slice(teamSize, requiredPlayers).map((p) => p.user_id);
-
-      // Create the match
-      const { data: newMatch, error: matchError } = await supabase
-        .from('matches')
-        .insert({
-          game_mode: gameMode,
-          team_size: teamSize,
-          status: 'pending',
-          team_a: teamA,
-          team_b: teamB,
-        })
-        .select()
-        .single();
-
-      if (matchError || !newMatch) return;
-
-      // Update all queue entries with the match ID
-      for (const player of matchPlayers) {
+        // B. Update opponent's queue status -> matched
         await supabase
           .from('matchmaking_queue')
-          .update({
-            status: 'matched',
-            match_id: newMatch.id,
-          })
-          .eq('id', player.id);
+          .update({ status: 'matched', match_id: match.id })
+          .eq('id', opponent.id);
 
-        // Also create match_players entries
+        // C. Set my status -> found
+        setMatchId(match.id);
+        setStatus('found');
+        toast.success('Opponent Found! Starting match...');
+
+      } else {
+        // --- NO OPPONENT. JOIN THE QUEUE ---
+        // Clean up any old queue entries first
         await supabase
-          .from('match_players')
+          .from('matchmaking_queue')
+          .delete()
+          .eq('user_id', user.id);
+
+        const { data: entry, error: queueError } = await supabase
+          .from('matchmaking_queue')
           .insert({
-            match_id: newMatch.id,
-            user_id: player.user_id,
-            team: teamA.includes(player.user_id) ? 'team_a' : 'team_b',
-          });
+            user_id: user.id,
+            game_mode: mode,
+            team_size: teamSize,
+            status: 'waiting',
+          })
+          .select()
+          .single();
+
+        if (queueError) throw queueError;
+
+        setQueueId(entry.id);
+        toast.info('Searching for players...');
       }
+
+    } catch (err: any) {
+      console.error('Matchmaking error:', err);
+      toast.error('Failed to join matchmaking: ' + err.message);
+      setStatus('error');
     }
-  };
+  }, [user]);
 
   const leaveQueue = useCallback(async () => {
     if (!user) return;
 
-    await supabase
-      .from('matchmaking_queue')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('status', 'waiting');
+    try {
+      await supabase
+        .from('matchmaking_queue')
+        .delete()
+        .eq('user_id', user.id);
 
-    setQueueStatus('idle');
-    setQueueEntry(null);
+      setStatus('idle');
+      setQueueId(null);
+      toast.info('Left matchmaking queue');
+    } catch (err) {
+      console.error('Error leaving queue:', err);
+    }
   }, [user]);
 
-  const resetMatch = useCallback(() => {
-    setQueueStatus('idle');
-    setQueueEntry(null);
-    setCurrentMatch(null);
-  }, []);
-
   return {
-    queueStatus,
-    queueEntry,
-    currentMatch,
-    playersInQueue,
-    searchTime,
     joinQueue,
     leaveQueue,
-    resetMatch,
+    status,
+    matchId,
   };
 };

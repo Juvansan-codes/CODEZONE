@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { ArrowLeft, Trophy, Medal, Award, TrendingUp, Users, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -31,40 +32,135 @@ const getRankColor = (rank: number) => {
 
 const Leaderboard: React.FC = () => {
   const navigate = useNavigate();
-  const [timeframe, setTimeframe] = useState('weekly');
+  const { user } = useAuth();
+  const [timeframe, setTimeframe] = useState('alltime');
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    activePlayers: 0,
+    matchesToday: 0,
+    userRank: '-',
+    topScore: 0
+  });
 
+  // Fetch Overview Stats
+  useEffect(() => {
+    const fetchStats = async () => {
+      // Active Players
+      const { count: playersCount } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true });
+
+      // Matches Today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const { count: matchesCount } = await supabase
+        .from('matches')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', today.toISOString());
+
+      // Top Score (All Time)
+      const { data: topPlayer } = await supabase
+        .from('profiles')
+        .select('total_wins')
+        .order('total_wins', { ascending: false })
+        .limit(1)
+        .single();
+
+      setStats(prev => ({
+        ...prev,
+        activePlayers: playersCount || 0,
+        matchesToday: matchesCount || 0,
+        topScore: topPlayer?.total_wins || 0
+      }));
+    };
+    fetchStats();
+  }, []);
+
+  // Fetch Leaderboard Data
   useEffect(() => {
     const fetchLeaderboard = async () => {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('total_wins', { ascending: false })
-        .limit(50);
+      try {
+        if (timeframe === 'alltime') {
+          // Simple query for all-time stats
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('total_wins', { ascending: false })
+            .limit(50);
 
-      if (error) {
-        console.error('Error fetching leaderboard:', error);
-      } else if (data) {
-        const formattedPlayers: Player[] = data.map((profile, index) => ({
-          rank: index + 1,
-          name: profile.username || 'Unknown',
-          score: profile.xp || 0,
-          wins: profile.total_wins || 0,
-          matches: profile.total_matches || 0,
-          streak: 0, // Streak logic pending
-          tier: profile.rank || 'Novice'
-        }));
-        setPlayers(formattedPlayers);
+          if (data) {
+            const formatted = data.map((p, i) => ({
+              rank: i + 1,
+              name: p.username || 'Unknown',
+              score: p.xp || 0,
+              wins: p.total_wins || 0,
+              matches: p.total_matches || 0,
+              streak: 0,
+              tier: p.rank || 'Bronze'
+            }));
+            setPlayers(formatted);
+
+            // Find User Rank if logged in
+            if (user) {
+              const myRank = formatted.findIndex(p => p.name === data.find(d => d.user_id === user.id)?.username);
+              setStats(prev => ({ ...prev, userRank: myRank !== -1 ? `#${myRank + 1}` : '-' }));
+            }
+          }
+        } else {
+          // Complex logic for Daily/Weekly
+          // 1. Get recent matches
+          const startDate = new Date();
+          if (timeframe === 'weekly') startDate.setDate(startDate.getDate() - 7);
+          else if (timeframe === 'daily') startDate.setHours(0, 0, 0, 0);
+
+          const { data: matches } = await supabase
+            .from('match_players')
+            .select('user_id, is_winner, profiles(username, rank)')
+            .gte('created_at', startDate.toISOString())
+            .eq('is_winner', true);
+
+          if (matches) {
+            // Aggregate wins
+            const winCounts: Record<string, { wins: number, username: string, tier: string }> = {};
+            matches.forEach((m: any) => {
+              const uid = m.user_id;
+              if (!winCounts[uid]) {
+                winCounts[uid] = {
+                  wins: 0,
+                  username: m.profiles?.username || 'Unknown',
+                  tier: m.profiles?.rank || 'Bronze'
+                };
+              }
+              winCounts[uid].wins++;
+            });
+
+            const sorted = Object.values(winCounts)
+              .sort((a, b) => b.wins - a.wins)
+              .map((p, i) => ({
+                rank: i + 1,
+                name: p.username,
+                score: p.wins * 100, // Estimated score
+                wins: p.wins,
+                matches: 0, // Hard to get without another query
+                streak: 0,
+                tier: p.tier
+              }));
+
+            setPlayers(sorted);
+          }
+        }
+      } catch (err) {
+        console.error('Leaderboard fetch error:', err);
       }
 
       setLoading(false);
     };
 
     fetchLeaderboard();
-  }, []);
+  }, [timeframe, user]);
 
   return (
     <div className="min-h-screen">
@@ -86,23 +182,23 @@ const Leaderboard: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="glass-panel p-4 text-center">
             <Users className="mx-auto mb-2 text-primary" size={28} />
-            <p className="text-2xl font-bold">1,247</p>
+            <p className="text-2xl font-bold">{stats.activePlayers.toLocaleString()}</p>
             <p className="text-sm text-muted-foreground">Active Players</p>
           </div>
           <div className="glass-panel p-4 text-center">
             <TrendingUp className="mx-auto mb-2 text-primary" size={28} />
-            <p className="text-2xl font-bold">5,892</p>
+            <p className="text-2xl font-bold">{stats.matchesToday.toLocaleString()}</p>
             <p className="text-sm text-muted-foreground">Matches Today</p>
           </div>
           <div className="glass-panel p-4 text-center">
             <Star className="mx-auto mb-2 text-gold" size={28} />
-            <p className="text-2xl font-bold">42</p>
+            <p className="text-2xl font-bold">{stats.userRank}</p>
             <p className="text-sm text-muted-foreground">Your Rank</p>
           </div>
           <div className="glass-panel p-4 text-center">
             <Trophy className="mx-auto mb-2 text-yellow-400" size={28} />
-            <p className="text-2xl font-bold">15,420</p>
-            <p className="text-sm text-muted-foreground">Top Score</p>
+            <p className="text-2xl font-bold">{stats.topScore.toLocaleString()}</p>
+            <p className="text-sm text-muted-foreground">Top Wins</p>
           </div>
         </div>
 
@@ -140,7 +236,7 @@ const Leaderboard: React.FC = () => {
                   <span>{player.matches - player.wins} L</span>
                 </div>
               </div>
-            ))}
+            )))}
         </div>
 
         {/* Full Leaderboard */}
