@@ -107,20 +107,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!user) return;
 
     const fetchProfile = async () => {
+      console.log('GameContext: Fetching game data for', user.id);
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', user.id)
         .single();
 
+      if (error) console.error('GameContext: Error fetching profile', error);
+      if (data) console.log('GameContext: Got profile data', data);
+
       if (data && !error) {
         setGameData(prev => ({
           ...prev,
-          username: data.username || prev.username,
+          username: data.username || user.email?.split('@')[0] || 'Player',
           level: data.level || prev.level,
           xpPercent: data.xp ? (data.xp % 100) : prev.xpPercent,
-          coins: data.coins || prev.coins,
-          gems: data.gems || prev.gems,
+          coins: data.coins ?? prev.coins,
+          gems: data.gems ?? prev.gems,
           rank: data.rank || prev.rank,
           stats: {
             ...prev.stats,

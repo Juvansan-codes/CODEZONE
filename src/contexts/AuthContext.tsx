@@ -39,14 +39,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
+    console.log('AuthContext: Fetching profile for', userId);
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('user_id', userId)
       .single();
 
+    if (error) {
+      console.error('AuthContext: Error fetching profile:', error);
+    }
+
     if (!error && data) {
+      console.log('AuthContext: Profile found:', data);
       setProfile(data as Profile);
+    } else {
+      console.log('AuthContext: No profile found for user', userId);
     }
   };
 
@@ -56,7 +64,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
-        
+
         // Defer Supabase calls with setTimeout to prevent deadlock
         if (session?.user) {
           setTimeout(() => {
@@ -83,7 +91,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signUp = async (email: string, password: string, username: string) => {
     const redirectUrl = `${window.location.origin}/`;
-    
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -95,7 +103,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         },
       },
     });
-    
+
     return { error: error as Error | null };
   };
 
@@ -104,7 +112,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email,
       password,
     });
-    
+
     return { error: error as Error | null };
   };
 

@@ -1,3 +1,4 @@
+
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -39,7 +40,6 @@ export const useMatchmaking = () => {
           filter: `id=eq.${queueId}`,
         },
         (payload) => {
-          console.log('Queue update (Realtime):', payload);
           if (payload.new.status === 'matched' && payload.new.match_id) {
             handleMatchFound(payload.new.match_id);
           }
@@ -59,7 +59,6 @@ export const useMatchmaking = () => {
         .single();
 
       if (queueData?.status === 'matched' && queueData?.match_id) {
-        console.log('Match found via Queue poll:', queueData);
         handleMatchFound(queueData.match_id);
         return;
       }
@@ -76,7 +75,6 @@ export const useMatchmaking = () => {
         .single();
 
       if (matchData) {
-        console.log('Match found via Matches table poll:', matchData);
         handleMatchFound(matchData.id);
       }
     }, 3000);
@@ -114,8 +112,8 @@ export const useMatchmaking = () => {
         .eq('status', 'waiting')
         .lt('created_at', twoMinutesAgo);
 
-      // 2. Search for a FRESH waiting opponent
-      const { data: opponents, error: searchError } = await supabase
+      // 2. Search for a FRESH waiting opponent (fetch batch to filter for online)
+      const { data: potentialOpponents, error: searchError } = await supabase
         .from('matchmaking_queue')
         .select('*')
         .eq('game_mode', mode)
@@ -123,13 +121,33 @@ export const useMatchmaking = () => {
         .eq('status', 'waiting')
         .neq('user_id', user.id) // Don't match with self
         .gte('created_at', twoMinutesAgo) // Only fresh entries
-        .limit(1);
+        .limit(10); // Fetch more than 1 to allow for filtering
 
       if (searchError) throw searchError;
 
-      if (opponents && opponents.length > 0) {
-        // --- FOUND AN OPPONENT! MATCH THEM! ---
-        const opponent = opponents[0];
+      let validOpponent = null;
+
+      if (potentialOpponents && potentialOpponents.length > 0) {
+        // Check which of these opponents are actually online
+        const opponentIds = potentialOpponents.map(op => op.user_id);
+
+        const { data: onlineProfiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('user_id')
+          .in('user_id', opponentIds)
+          .eq('is_online', true);
+
+        if (!profilesError && onlineProfiles && onlineProfiles.length > 0) {
+          // Find the first opponent in our queue list that is also in the onlineProfiles list
+          // (This preserves the "first come first serve" order of the queue query)
+          const onlineUserIds = new Set(onlineProfiles.map(p => p.user_id));
+          validOpponent = potentialOpponents.find(op => onlineUserIds.has(op.user_id));
+        }
+      }
+
+      if (validOpponent) {
+        // --- FOUND A VALID ONLINE OPPONENT! MATCH THEM! ---
+        const opponent = validOpponent;
 
         // A. Create the match
         const { data: match, error: matchError } = await supabase
@@ -154,8 +172,7 @@ export const useMatchmaking = () => {
           .eq('id', opponent.id);
 
         if (updateError) {
-          console.error('Failed to update opponent queue status (RLS?):', updateError);
-          // We continue anyway, because the polling fallback will catch it!
+          // console.warn('Failed to update opponent queue status (RLS?) - this is expected, polling fallback will handle it.');
         }
 
         // C. Set my status -> found

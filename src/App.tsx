@@ -19,9 +19,13 @@ import Leaderboard from "./pages/Leaderboard";
 import Analytics from "./pages/Analytics";
 import Challenges from "./pages/Challenges";
 import NotFound from "./pages/NotFound";
+import AdminDashboard from "./pages/AdminDashboard";
 
 
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminRoute from "@/components/AdminRoute";
+
+import PresenceHandler from '@/components/PresenceHandler';
 
 const queryClient = new QueryClient();
 
@@ -29,6 +33,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <GameProvider>
+        <PresenceHandler />
         <TooltipProvider>
           <Toaster />
           <Sonner />
@@ -75,6 +80,10 @@ const App = () => (
                   <Challenges />
                 </ProtectedRoute>
               } />
+
+              <Route path="/admin" element={<AdminRoute />}>
+                <Route index element={<AdminDashboard />} />
+              </Route>
 
               <Route path="*" element={<NotFound />} />
             </Routes>

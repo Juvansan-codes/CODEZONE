@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useGameSession, TeamSize } from '@/hooks/useGameSession';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Terminal, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 declare global {
@@ -13,15 +14,13 @@ declare global {
   }
 }
 
+
+
+
+
 const RANKS = [
   'Bronze Techie', 'Silver Debugger', 'Gold Architect', 'Platinum Engineer',
   'Shadow Coder', 'Elite Exploiter', 'Cyber Overlord', 'Hacker Legend'
-];
-
-const QUESTIONS = [
-  { title: 'Reverse String', description: 'Write a python function to reverse a string' },
-  { title: 'Palindrome Check', description: 'Check if string is palindrome in Python' },
-  { title: 'Two Sum', description: 'Return indices that sum to target using Python' },
 ];
 
 // Sabotage costs in seconds
@@ -63,12 +62,21 @@ const Game: React.FC = () => {
     stopGame,
     deductMyTime,
     deductEnemyTime,
-    initializeDemo
+    initializeDemo,
+    surrenderMatch,
+    isLoading
   } = useGameSession(matchId);
 
+  // Determine win status
+  const isMatchCompleted = gameState.matchStatus === 'completed';
+  const isWinner = isMatchCompleted && (
+    (gameState._raw?.isTeamA && gameState.winnerTeam === 'team_a') ||
+    (!gameState._raw?.isTeamA && gameState.winnerTeam === 'team_b')
+  );
+
   const [wins, setWins] = useState(0);
-  const [question, setQuestion] = useState(QUESTIONS[0]);
-  const [code, setCode] = useState('// Write your code. Earn glory.');
+  const [question, setQuestion] = useState<any>({ title: 'Loading...', description: 'Fetching question...' });
+  const [code, setCode] = useState('// Loading environment...');
   const [logs, setLogs] = useState<string[]>(['Arena ready — fight begins!']);
   const [sabotageEffects, setSabotageEffects] = useState<{ fog: boolean; invert: boolean; shake: boolean }>({
     fog: false, invert: false, shake: false
@@ -79,59 +87,31 @@ const Game: React.FC = () => {
   const [pyodide, setPyodide] = useState<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize game on mount
-  useEffect(() => {
-    setQuestion(QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)]);
-
-    if (!matchId) {
-      // Demo mode - use team size from URL params
-      initializeDemo(teamSizeParam);
-    }
-
-    // Start the game after a short delay
-    const timer = setTimeout(() => startGame(), 1000);
-    return () => clearTimeout(timer);
-  }, [matchId, teamSizeParam, initializeDemo, startGame]);
-
-  const addLog = useCallback((msg: string) => {
-    setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
-  }, []);
-
-  // Audio Instance - specific to this Game component lifecycle
+  // Audio Instance
   const [audio] = useState(() => {
     const a = new Audio('/game-music.mp3');
     a.loop = true;
     return a;
   });
 
+  const addLog = useCallback((msg: string) => {
+    setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
+  }, []);
+
   // Handle Play/Pause and Volume
   useEffect(() => {
     audio.volume = settings.musicVolume / 100;
 
     if (settings.bgmEnabled) {
-      // Only play if not already playing
       if (audio.paused) {
         audio.play().catch(error => {
           console.error("Audio play failed:", error);
-          // Handle Autoplay restrictions
-          if (error.name === 'NotAllowedError') {
-            toast.error("Auto-play blocked. Click anywhere to update!", {
-              action: {
-                label: "Play Music",
-                onClick: () => audio.play()
-              },
-              duration: 5000,
-            });
-          } else if (error.name === 'NotSupportedError') {
-            toast.error("Audio format not supported.");
-          }
         });
       }
     } else {
       audio.pause();
     }
 
-    // Cleanup on unmount
     return () => {
       audio.pause();
       audio.currentTime = 0;
@@ -148,7 +128,6 @@ const Game: React.FC = () => {
           setIsPyodideReady(true);
           addLog('Python environment loaded successfully');
         } else {
-          // Retry if script hasn't loaded yet
           setTimeout(initPyodide, 500);
         }
       } catch (err) {
@@ -159,21 +138,33 @@ const Game: React.FC = () => {
     initPyodide();
   }, [addLog]);
 
-  const checkEnd = useCallback(() => {
-    if (gameState.enemyTeamTime <= 0) {
-      setWins((prev) => prev + 1);
-      toast.success('🏆 VICTORY!');
-      stopGame();
-    }
-    if (gameState.myTeamTime <= 0) {
-      toast.error('💀 DEFEAT');
-      stopGame();
-    }
-  }, [gameState.enemyTeamTime, gameState.myTeamTime, stopGame]);
 
+
+
+
+  // Fetch questions from DB
   useEffect(() => {
-    checkEnd();
-  }, [gameState.myTeamTime, gameState.enemyTeamTime, checkEnd]);
+    const fetchQuestions = async () => {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('*');
+
+      if (!error && data && data.length > 0) {
+        // For now, just pick the first one or random
+        setQuestion(data[0]);
+        setCode(data[0].template_code || '# Write your solution here');
+      } else {
+        // Fallback if no questions in DB
+        setQuestion({
+          title: 'No Questions Found',
+          description: 'Please add questions in Admin Dashboard.',
+          id: '0',
+          difficulty: 'Easy'
+        } as any);
+      }
+    };
+    fetchQuestions();
+  }, []);
 
   const runCode = async () => {
     setConsoleOutput([]); // Clear previous output
@@ -191,16 +182,70 @@ const Game: React.FC = () => {
         }
       });
 
-      // Execute Python code
+      // 1. Run User Code to define functions
       await pyodide.runPythonAsync(code);
 
-      deductEnemyTime(10);
-      toast.success('🔥 EXECUTION SUCCESSFUL - Enemy -10s');
-      addLog('Python code ran successfully');
+      // 2. Run Test Cases
+      const testCases = question.test_cases as any[];
+      if (testCases && testCases.length > 0) {
+        let allPassed = true;
+
+        for (const testCase of testCases) {
+          const inputVal = testCase.input;
+          const expectedOut = testCase.output;
+
+          // Construct python call: solution(input)
+          // We assume input is valid python literal if possible, or string.
+          // To be safe, let's treat input as code to evaluate if it looks like a number/list, or string.
+          // Actually, let's pass it as a JSON string and parse it in Python to be robust.
+
+          const testRunner = `
+import json
+try:
+    # Attempt to use 'solution' function
+    if 'solution' not in globals():
+        print("Error: Function 'solution' not found. Please define 'def solution(arg):'")
+        raise Exception("Function missing")
+        
+    # Prepare input
+    inp_str = '${inputVal.replace(/'/g, "\\'")}'
+    # Try to eval input safely, or just treat as string
+    try:
+        inp = eval(inp_str)
+    except:
+        inp = inp_str
+        
+    result = solution(inp)
+    print(f"Input: {inp} | Output: {result}")
+    
+    # Check result
+    if str(result) == '${expectedOut}':
+        print("✅ Passed")
+    else:
+        print(f"❌ Failed. Expected: ${expectedOut}")
+        raise Exception("Test failed")
+        
+except Exception as e:
+    print(f"Error: {e}")
+    raise e
+`;
+          await pyodide.runPythonAsync(testRunner);
+        }
+
+        if (allPassed) {
+          deductEnemyTime(10);
+          toast.success('🔥 ALL TESTS PASSED! Enemy -10s');
+          addLog('Code submitted and passed all tests!');
+        }
+      } else {
+        // No test cases, just run
+        deductEnemyTime(5);
+        toast.success('⚠️ Code ran (No tests defined)');
+      }
 
     } catch (err: any) {
-      setConsoleOutput(prev => [...prev, { type: 'error', content: err.toString() }]);
-      toast.error('❌ RUNTIME ERROR');
+      // setConsoleOutput(prev => [...prev, { type: 'error', content: err.toString() }]); // Don't duplicate if python printed error
+      toast.error('❌ VALIDATION FAILED');
     }
   };
 
@@ -271,9 +316,16 @@ const Game: React.FC = () => {
     setTimeout(() => setMemeCooldown(false), 180000);
   };
 
-  const handleExitMatch = () => {
-    stopGame();
-    navigate('/lobby');
+  const handleExitMatch = async () => {
+    if (gameState.isRunning && !isMatchCompleted) {
+      if (confirm('⚠️ WARNING: Exiting the match will count as a SURRENDER. You will lose progress. Are you sure?')) {
+        await surrenderMatch();
+        toast.info('You have surrendered the match.');
+        navigate('/lobby');
+      }
+    } else {
+      navigate('/lobby');
+    }
   };
 
   const currentRank = RANKS[Math.min(wins, RANKS.length - 1)];
@@ -288,7 +340,31 @@ const Game: React.FC = () => {
   const timeUntilSabotage = Math.max(0, halfwayPoint - elapsedTime);
 
   return (
-    <div className="min-h-screen p-3 md:p-4">
+    <div className="min-h-screen p-3 md:p-4 relative">
+      {/* Match Result Overlay */}
+      {isMatchCompleted && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
+          <div className="bg-surface border border-border p-8 rounded-2xl max-w-md w-full text-center space-y-6 shadow-2xl">
+            <div className="text-6xl mb-4">
+              {isWinner ? '🏆' : '💀'}
+            </div>
+            <div>
+              <h2 className={`text-4xl font-bold font-orbitron mb-2 ${isWinner ? 'text-gold' : 'text-red-500'}`}>
+                {isWinner ? 'VICTORY' : 'DEFEAT'}
+              </h2>
+              <p className="text-muted-foreground">
+                {isWinner ? 'You validated your dominance.' : 'Better luck next time, coder.'}
+              </p>
+            </div>
+
+            <div className="flex justify-center pt-4">
+              <Button onClick={() => navigate('/lobby')} className="w-full bg-primary hover:bg-primary/80">
+                Return to Lobby
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Fog overlay */}
       {sabotageEffects.fog && (
         <div className="fixed inset-0 pointer-events-none z-50 bg-gradient-radial from-transparent via-black/70 to-black/95" />
@@ -337,38 +413,46 @@ const Game: React.FC = () => {
 
           {/* Timers */}
           <div className="glass-panel p-4">
-            <div className="mb-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-bold">YOUR TEAM ⏱️</span>
-                <span className={gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''}>
-                  {formatTime(gameState.myTeamTime)}
-                </span>
+            {isLoading ? (
+              <div className="flex justify-center items-center h-20 text-muted-foreground gap-2">
+                <Loader2 className="animate-spin w-4 h-4" /> Syncing Timer...
               </div>
-              <div className="h-3 bg-black/50 rounded-full overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-300 ${myTimePercent > 50
-                    ? 'bg-gradient-to-r from-primary to-primary/70'
-                    : myTimePercent > 25
-                      ? 'bg-gradient-to-r from-gold to-gold/80'
-                      : 'bg-gradient-to-r from-accent to-accent/70'
-                    }`}
-                  style={{ width: `${myTimePercent}%` }}
-                />
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-bold">YOUR TEAM ⏱️</span>
+                    <span className={gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''}>
+                      {formatTime(gameState.myTeamTime)}
+                    </span>
+                  </div>
+                  <div className="h-3 bg-black/50 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${myTimePercent > 50
+                        ? 'bg-gradient-to-r from-primary to-primary/70'
+                        : myTimePercent > 25
+                          ? 'bg-gradient-to-r from-gold to-gold/80'
+                          : 'bg-gradient-to-r from-accent to-accent/70'
+                        }`}
+                      style={{ width: `${myTimePercent}%` }}
+                    />
+                  </div>
+                </div>
 
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-bold text-accent">ENEMY ⏱️</span>
-                <span>{formatTime(gameState.enemyTeamTime)}</span>
-              </div>
-              <div className="h-3 bg-black/50 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-accent to-red-900 transition-all duration-300"
-                  style={{ width: `${enemyTimePercent}%` }}
-                />
-              </div>
-            </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-bold text-accent">ENEMY ⏱️</span>
+                    <span>{formatTime(gameState.enemyTeamTime)}</span>
+                  </div>
+                  <div className="h-3 bg-black/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-accent to-red-900 transition-all duration-300"
+                      style={{ width: `${enemyTimePercent}%` }}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Sabotages */}
@@ -481,7 +565,7 @@ const Game: React.FC = () => {
               <CheckCircle2 size={16} /> SUBMIT
             </Button>
             <Button variant="outline" onClick={handleExitMatch} className="gap-2">
-              <XCircle size={16} /> Exit
+              <XCircle size={16} /> {isMatchCompleted ? 'Leave' : 'Surrender'}
             </Button>
           </div>
         </main>

@@ -168,9 +168,3 @@ FOR EACH ROW
 EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Insert default challenges
-INSERT INTO public.challenges (title, description, challenge_type, difficulty, reward_coins, reward_gems, reward_xp, requirements) VALUES
-('First Blood', 'Win your first match today', 'daily', 'easy', 100, 10, 50, '{"wins": 1}'),
-('Speed Demon', 'Solve 3 problems in under 5 minutes each', 'daily', 'medium', 200, 20, 100, '{"fast_solves": 3}'),
-('Win Streak', 'Win 3 matches in a row', 'weekly', 'hard', 500, 50, 250, '{"win_streak": 3}'),
-('Code Marathon', 'Solve 20 problems this week', 'weekly', 'medium', 400, 40, 200, '{"problems_solved": 20}'),
-('Sabotage Master', 'Use 10 sabotages in matches', 'weekly', 'easy', 150, 15, 75, '{"sabotages_used": 10}')

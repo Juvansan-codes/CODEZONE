@@ -26,7 +26,7 @@ export const usePresence = () => {
     if (!channelRef.current || !user || !profile) return;
 
     setMyStatus(status);
-    
+
     await channelRef.current.track({
       user_id: user.id,
       username: profile.username,
@@ -35,14 +35,18 @@ export const usePresence = () => {
     });
 
     // Also update database for persistence
-    await supabase
+    const { error } = await supabase
       .from('profiles')
-      .update({ 
-        is_online: true, 
+      .update({
+        is_online: true,
         current_status: status,
-        last_seen: new Date().toISOString() 
+        last_seen: new Date().toISOString()
       })
       .eq('user_id', user.id);
+
+    if (error) {
+      console.error('Error updating presence:', error);
+    }
   }, [user, profile]);
 
   // Set status
@@ -76,7 +80,7 @@ export const usePresence = () => {
       .on('presence', { event: 'sync' }, () => {
         const newState = channel.presenceState<PresenceState>();
         const users = new Map<string, OnlineUser>();
-        
+
         Object.entries(newState).forEach(([key, presences]) => {
           if (presences.length > 0) {
             const latest = presences[presences.length - 1];
@@ -87,7 +91,7 @@ export const usePresence = () => {
             });
           }
         });
-        
+
         setOnlineUsers(users);
       })
       .on('presence', { event: 'join' }, ({ key, newPresences }) => {
@@ -128,10 +132,10 @@ export const usePresence = () => {
     const handleBeforeUnload = async () => {
       await supabase
         .from('profiles')
-        .update({ 
-          is_online: false, 
+        .update({
+          is_online: false,
           current_status: 'offline',
-          last_seen: new Date().toISOString() 
+          last_seen: new Date().toISOString()
         })
         .eq('user_id', user.id);
     };
