@@ -88,7 +88,9 @@ const Leaderboard: React.FC = () => {
           const { data, error } = await supabase
             .from('profiles')
             .select('*')
-            .order('total_wins', { ascending: false })
+            // Order by total wins, falling back to XP if tied
+            .order('total_wins', { ascending: false, nullsFirst: false })
+            .order('xp', { ascending: false, nullsFirst: false })
             .limit(50);
 
           if (data) {
