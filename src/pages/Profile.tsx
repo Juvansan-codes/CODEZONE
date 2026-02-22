@@ -4,12 +4,9 @@ import { useGame } from '@/contexts/GameContext';
 import { ArrowLeft, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-const tabs = ['Basic Info', 'Career Results', 'Performance', 'Achievements', 'Connections', 'Inventory', 'Mentor System'];
-
 const Profile: React.FC = () => {
   const navigate = useNavigate();
   const { gameData } = useGame();
-  const [activeTab, setActiveTab] = useState('Basic Info');
   const [xpWidth, setXpWidth] = useState(0);
 
   useEffect(() => {
@@ -43,7 +40,7 @@ const Profile: React.FC = () => {
         </div>
 
         {/* Right - Profile Info */}
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_180px]">
+        <div className="flex flex-col">
           <div className="p-6 space-y-6">
             {/* User Info */}
             <div className="flex items-center gap-4">
@@ -100,27 +97,6 @@ const Profile: React.FC = () => {
               </div>
             </div>
 
-            {/* Chart Placeholder */}
-            <div className="bg-surface border border-border rounded-xl h-28 flex items-center justify-center text-muted-foreground text-sm">
-              📊 Performance graph coming soon
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="bg-background border-l border-border p-3 space-y-2">
-            {tabs.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-all ${
-                  activeTab === tab
-                    ? 'bg-primary/15 text-foreground border border-primary'
-                    : 'text-muted-foreground border border-transparent hover:bg-primary/10'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
           </div>
         </div>
       </div>
