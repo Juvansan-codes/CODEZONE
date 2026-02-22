@@ -233,9 +233,12 @@ except Exception as e:
         }
 
         if (allPassed) {
-          deductEnemyTime(10);
-          toast.success('🔥 ALL TESTS PASSED! Enemy -10s');
-          addLog('Code submitted and passed all tests!');
+          // If all tests passed, we instantly WIN by deducting an enormous amount of time from the enemy
+          // or we can just call finishMatch directly. Let's just deduct a massive amount so the timer naturally drops
+          // and triggers the win condition in the hook.
+          deductEnemyTime(99999);
+          toast.success('🔥 CODE PERFECT! CRITICAL HIT!');
+          addLog('Code submitted and passed all tests! Enemy obliterated!');
         }
       } else {
         // No test cases, just run
@@ -343,24 +346,57 @@ except Exception as e:
     <div className="min-h-screen p-3 md:p-4 relative">
       {/* Match Result Overlay */}
       {isMatchCompleted && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
-          <div className="bg-surface border border-border p-8 rounded-2xl max-w-md w-full text-center space-y-6 shadow-2xl">
-            <div className="text-6xl mb-4">
-              {isWinner ? '🏆' : '💀'}
-            </div>
-            <div>
-              <h2 className={`text-4xl font-bold font-orbitron mb-2 ${isWinner ? 'text-gold' : 'text-red-500'}`}>
-                {isWinner ? 'VICTORY' : 'DEFEAT'}
-              </h2>
-              <p className="text-muted-foreground">
-                {isWinner ? 'You validated your dominance.' : 'Better luck next time, coder.'}
-              </p>
-            </div>
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
+          <div className={`relative overflow-hidden border p-1 rounded-3xl max-w-lg w-full text-center shadow-2xl ${isWinner ? 'bg-gradient-to-br from-gold/50 via-yellow-600/20 to-transparent border-gold/50 shadow-gold/20'
+              : 'bg-gradient-to-br from-red-600/50 via-red-900/20 to-transparent border-red-500/50 shadow-red-500/20'
+            }`}>
+            <div className="bg-surface/90 backdrop-blur-xl p-8 rounded-[22px] space-y-6">
 
-            <div className="flex justify-center pt-4">
-              <Button onClick={() => navigate('/lobby')} className="w-full bg-primary hover:bg-primary/80">
-                Return to Lobby
-              </Button>
+              <div className="relative">
+                <div className={`text-8xl mb-2 drop-shadow-2xl animate-bounce ${isWinner ? 'text-gold' : 'text-red-500'}`}>
+                  {isWinner ? '🏆' : '💀'}
+                </div>
+                {isWinner && (
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-gold/20 rounded-full blur-2xl -z-10" />
+                )}
+              </div>
+
+              <div>
+                <h2 className={`text-5xl font-black font-orbitron tracking-wider uppercase mb-3 drop-shadow-lg ${isWinner ? 'text-gold' : 'text-red-500'}`}>
+                  {isWinner ? 'VICTORY' : 'DEFEAT'}
+                </h2>
+                <p className="text-muted-foreground text-lg">
+                  {isWinner ? 'You validated your dominance in the arena.' : 'Better luck next time, coder.'}
+                </p>
+              </div>
+
+              {/* Reward/Loss Summary */}
+              <div className="grid grid-cols-2 gap-4 py-4">
+                <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-widest">Coins</p>
+                  <p className={`text-2xl font-bold font-mono ${isWinner ? 'text-gold' : 'text-white'}`}>
+                    {isWinner ? '+100' : '+10'} <span className="text-base">🪙</span>
+                  </p>
+                </div>
+                <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-widest">Experience</p>
+                  <p className={`text-2xl font-bold font-mono ${isWinner ? 'text-blue-400' : 'text-white'}`}>
+                    {isWinner ? '+50' : '+10'} <span className="text-base text-purple-400">⚡</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <Button
+                  onClick={() => navigate('/lobby')}
+                  className={`w-full h-14 text-lg font-bold tracking-widest uppercase transition-all hover:scale-[1.02] ${isWinner ? 'bg-gold hover:bg-gold/90 text-black shadow-[0_0_20px_rgba(251,191,36,0.4)]'
+                      : 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]'
+                    }`}
+                >
+                  Return to Lobby
+                </Button>
+              </div>
+
             </div>
           </div>
         </div>

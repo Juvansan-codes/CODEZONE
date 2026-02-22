@@ -23,6 +23,7 @@ interface GameSessionState {
   isMyTurn: boolean;
   matchStatus: string;
   winnerTeam: string | null;
+  isFinishing?: boolean;
   _raw?: {
     startedAt: string | null;
     myPenalties: number;
@@ -75,7 +76,8 @@ export const useGameSession = (matchId?: string) => {
     sabotagesUnlocked: false,
     isMyTurn: true,
     matchStatus: 'pending',
-    winnerTeam: null
+    winnerTeam: null,
+    isFinishing: false
   });
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -300,6 +302,28 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, gameState._raw]);
 
+  // Finish match via RPC
+  const finishMatch = useCallback(async (winnerTeam: 'team_a' | 'team_b') => {
+    if (!matchId) return;
+
+    // Prevent multiple calls
+    setGameState(prev => {
+      if (prev.isFinishing || prev.matchStatus === 'completed') return prev;
+      return { ...prev, isFinishing: true, isRunning: false };
+    });
+
+    try {
+      await (supabase.rpc as any)('finish_match', {
+        match_id_param: matchId,
+        winner_team_param: winnerTeam
+      });
+    } catch (error) {
+      console.error('Failed to finish match:', error);
+      // Revert lock on failure so it can be retried
+      setGameState(prev => ({ ...prev, isFinishing: false }));
+    }
+  }, [matchId]);
+
   // Deduct time from enemy team (for successful attacks)
   const deductEnemyTime = useCallback(async (seconds: number) => {
     // Optimistic update
@@ -362,6 +386,25 @@ export const useGameSession = (matchId?: string) => {
             prev.matchDuration
           );
 
+          // Check Win/Loss Condition
+          if (newMyTime <= 0 && newEnemyTime > 0) {
+            // My team ran out of time -> Enemy wins
+            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+              finishMatch(prev._raw.isTeamA ? 'team_b' : 'team_a');
+            }
+          } else if (newEnemyTime <= 0 && newMyTime > 0) {
+            // Enemy team ran out of time -> My team wins
+            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+              finishMatch(prev._raw.isTeamA ? 'team_a' : 'team_b');
+            }
+          } else if (newMyTime <= 0 && newEnemyTime <= 0) {
+            // Draw scenario (edge case). Let's just give it to Team A or handle differently.
+            // For now, Team A wins ties to keep it simple.
+            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+              finishMatch('team_a');
+            }
+          }
+
           return {
             ...prev,
             myTeamTime: newMyTime,
@@ -395,6 +438,7 @@ export const useGameSession = (matchId?: string) => {
     initializeDemo,
     loadMatchData,
     surrenderMatch,
+    finishMatch,
     isLoading
   };
 };
