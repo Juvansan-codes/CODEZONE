@@ -130,8 +130,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setGameData(prev => ({
           ...prev,
           username: data.username || user.email?.split('@')[0] || 'Player',
-          level: data.level || prev.level,
-          xpPercent: data.xp ? (data.xp % 100) : prev.xpPercent,
+          level: data.xp ? Math.floor(data.xp / 100) + 1 : prev.level,
+          xpPercent: typeof data.xp === 'number' ? (data.xp % 100) : prev.xpPercent,
           coins: data.coins ?? prev.coins,
           gems: data.gems ?? prev.gems,
           rank: data.rank || prev.rank,
