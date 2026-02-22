@@ -296,7 +296,7 @@ export const useGameSession = (matchId?: string) => {
         amount: seconds
       };
 
-      await supabase.rpc('apply_penalty', payload);
+      await (supabase.rpc as any)('apply_penalty', payload);
     }
   }, [matchId, gameState._raw]);
 
@@ -317,7 +317,7 @@ export const useGameSession = (matchId?: string) => {
         amount: seconds
       };
 
-      await supabase.rpc('apply_penalty', payload);
+      await (supabase.rpc as any)('apply_penalty', payload);
     }
   }, [matchId, gameState._raw]);
 
@@ -329,7 +329,7 @@ export const useGameSession = (matchId?: string) => {
     setGameState(prev => ({ ...prev, isRunning: false }));
 
     try {
-      await supabase.rpc('surrender_match', { match_id_param: matchId });
+      await (supabase.rpc as any)('surrender_match', { match_id_param: matchId });
     } catch (error) {
       console.error('Surrender failed:', error);
     }

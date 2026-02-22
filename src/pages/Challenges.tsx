@@ -78,7 +78,7 @@ const Challenges: React.FC = () => {
         const target = c.goal_target || 1;
         const percentage = Math.min(100, Math.round((progressVal / target) * 100));
         const isCompleted = progressVal >= target;
-        const isClaimed = progressEntry?.is_claimed || false;
+        const isClaimed = !!progressEntry?.claimed_at;
 
         return {
           id: c.id,
@@ -123,14 +123,14 @@ const Challenges: React.FC = () => {
     fetchChallenges();
   }, [user]);
 
-  const handleClaim = async (challengeId: string, rewardCoins: number, rewardGems: number) => {
+  const handleClaim = async (challengeId: string, rewardCoins: number, rewardGems: number, rewardXp: number = 0) => {
     if (!user) return;
 
     try {
       // 1. Update user_challenges to claimed
       const { error: updateError } = await supabase
         .from('user_challenges')
-        .update({ is_claimed: true })
+        .update({ claimed_at: new Date().toISOString() })
         .eq('user_id', user.id)
         .eq('challenge_id', challengeId);
 
@@ -139,23 +139,29 @@ const Challenges: React.FC = () => {
       // 2. Add rewards to profile
       const { data: profile, error: pError } = await supabase
         .from('profiles')
-        .select('coins, gems')
+        .select('*')
         .eq('user_id', user.id)
         .single();
 
       if (pError || !profile) throw new Error('Profile not found');
 
+      const updates: any = {
+        coins: (profile.coins || 0) + rewardCoins,
+        gems: (profile.gems || 0) + rewardGems
+      };
+
+      if (rewardXp > 0) {
+        updates.xp = (profile.xp || 0) + rewardXp;
+      }
+
       const { error: rewardError } = await supabase
         .from('profiles')
-        .update({
-          coins: (profile.coins || 0) + rewardCoins,
-          gems: (profile.gems || 0) + rewardGems
-        })
+        .update(updates)
         .eq('user_id', user.id);
 
       if (rewardError) throw rewardError;
 
-      toast.success(`Claimed ${rewardCoins} Coins & ${rewardGems} Gems!`);
+      toast.success(`Claimed ${rewardCoins} Coins, ${rewardGems} Gems${rewardXp > 0 ? ` & ${rewardXp} XP` : ''}!`);
 
       // Refresh local state
       setChallenges(prev => prev.map(c =>
