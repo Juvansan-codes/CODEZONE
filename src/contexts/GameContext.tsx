@@ -94,7 +94,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [settings, setSettings] = useState<Settings>(() => {
     // Load from local storage if available
     const saved = localStorage.getItem('codezone_settings');
-    return saved ? JSON.parse(saved) : defaultSettings;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Merge defaults with saved settings, handling cases where new settings were added
+        return { ...defaultSettings, ...parsed };
+      } catch (e) {
+        console.error('Failed to parse settings', e);
+      }
+    }
+    return defaultSettings;
   });
 
   // Save settings to local storage whenever they change
