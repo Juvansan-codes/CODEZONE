@@ -21,7 +21,7 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
         description: '',
         difficulty: 'Easy',
         game_mode: 'duel',
-        template_code: 'def solution():\n    pass',
+        template_code: '# Write your code here',
         test_cases: '[]'
     });
 
