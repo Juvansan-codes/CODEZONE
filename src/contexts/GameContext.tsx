@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthContext';
+import { getRankFromWins } from '@/lib/utils';
 
 export interface Friend {
   name: string;
@@ -134,7 +135,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           xpPercent: typeof data.xp === 'number' ? (data.xp % 100) : prev.xpPercent,
           coins: data.coins ?? prev.coins,
           gems: data.gems ?? prev.gems,
-          rank: data.rank || prev.rank,
+          rank: getRankFromWins(data.total_wins || 0),
           stats: {
             ...prev.stats,
             matches: data.total_matches || 0,

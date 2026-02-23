@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ArrowLeft, Trophy, Medal, Award, TrendingUp, Users, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getRankFromWins } from '@/lib/utils';
 
 interface Player {
   rank: number;
@@ -101,7 +102,7 @@ const Leaderboard: React.FC = () => {
               wins: p.total_wins || 0,
               matches: p.total_matches || 0,
               streak: 0,
-              tier: p.rank || 'Bronze'
+              tier: getRankFromWins(p.total_wins || 0)
             }));
             setPlayers(formatted);
 
@@ -120,7 +121,7 @@ const Leaderboard: React.FC = () => {
 
           const { data: matches } = await supabase
             .from('match_players')
-            .select('user_id, is_winner, profiles(username, rank)')
+            .select('user_id, is_winner, profiles(username, total_wins)')
             .gte('created_at', startDate.toISOString())
             .eq('is_winner', true);
 
@@ -133,7 +134,7 @@ const Leaderboard: React.FC = () => {
                 winCounts[uid] = {
                   wins: 0,
                   username: m.profiles?.username || 'Unknown',
-                  tier: m.profiles?.rank || 'Bronze'
+                  tier: getRankFromWins(m.profiles?.total_wins || 0)
                 };
               }
               winCounts[uid].wins++;

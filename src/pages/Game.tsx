@@ -83,8 +83,6 @@ const Game: React.FC = () => {
   });
   const [memeCooldown, setMemeCooldown] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
-  const [isPyodideReady, setIsPyodideReady] = useState(false);
-  const [pyodide, setPyodide] = useState<any>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
 
   // Audio Instance
@@ -117,15 +115,6 @@ const Game: React.FC = () => {
       audio.currentTime = 0;
     };
   }, [audio, settings.bgmEnabled, settings.musicVolume]);
-
-  // Pyodide is no longer used natively here as execution moved to backend
-  // useEffect(() => {
-  //  // ...
-  // }, []);
-
-
-
-
 
   // Fetch questions from DB
   useEffect(() => {
@@ -384,15 +373,15 @@ const Game: React.FC = () => {
             ⚔️ {gameState.teamSize}v{gameState.teamSize} Match — {formatTimeVerbose(gameState.matchDuration)} Total
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded-lg border border-border bg-surface text-sm">
+        <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
+          <div className="px-3 py-1.5 rounded-lg border border-border bg-surface text-sm whitespace-nowrap">
             {gameState.sabotagesUnlocked ? (
               <span className="text-primary">🔓 Sabotages Active</span>
             ) : (
-              <span className="text-muted-foreground">🔒 Unlocks in {formatTime(timeUntilSabotage)}</span>
+              <span className="text-muted-foreground">🔒 Unlocks in {formatTimeVerbose(timeUntilSabotage)}</span>
             )}
           </div>
-          <div className="px-4 py-2 rounded-xl border border-gold/40 bg-gradient-to-br from-gold/25 to-gold/10 text-gold font-orbitron font-bold">
+          <div className="px-4 py-2 rounded-xl border border-gold/40 bg-gradient-to-br from-gold/25 to-gold/10 text-gold font-orbitron font-bold whitespace-nowrap">
             {currentRank}
           </div>
         </div>
@@ -428,7 +417,7 @@ const Game: React.FC = () => {
                 <div className="mb-4">
                   <div className="flex justify-between text-sm mb-1">
                     <span className="font-bold">YOUR TEAM ⏱️</span>
-                    <span className={gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''}>
+                    <span className={gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''} style={{ fontVariantNumeric: 'tabular-nums' }}>
                       {formatTime(gameState.myTeamTime)}
                     </span>
                   </div>
@@ -448,7 +437,7 @@ const Game: React.FC = () => {
                 <div>
                   <div className="flex justify-between text-sm mb-1">
                     <span className="font-bold text-accent">ENEMY ⏱️</span>
-                    <span>{formatTime(gameState.enemyTeamTime)}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(gameState.enemyTeamTime)}</span>
                   </div>
                   <div className="h-3 bg-black/50 rounded-full overflow-hidden">
                     <div
@@ -563,14 +552,14 @@ const Game: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex gap-3">
-            <Button onClick={runCode} disabled={isExecuting} className="bg-primary hover:bg-primary/80 gap-2">
+          <div className="flex gap-3 mt-3">
+            <Button onClick={runCode} disabled={isExecuting} className="bg-primary hover:bg-primary/80 gap-2 flex-1 md:flex-none">
               <Play size={16} fill="currentColor" /> RUN CODE
             </Button>
-            <Button onClick={submitCode} disabled={isExecuting} className="bg-gold text-gold-foreground hover:bg-gold/80 gap-2">
+            <Button onClick={submitCode} disabled={isExecuting} className="bg-gold text-gold-foreground hover:bg-gold/80 gap-2 flex-1 md:flex-none">
               <CheckCircle2 size={16} /> SUBMIT
             </Button>
-            <Button variant="outline" onClick={handleExitMatch} className="gap-2">
+            <Button variant="outline" onClick={handleExitMatch} className="gap-2 flex-1 md:flex-none">
               <XCircle size={16} /> {isMatchCompleted ? 'Leave' : 'Surrender'}
             </Button>
           </div>

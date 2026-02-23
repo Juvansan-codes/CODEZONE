@@ -81,6 +81,7 @@ export const useGameSession = (matchId?: string) => {
   });
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null);
 
   // Calculate if sabotages are unlocked (after half-time)
   const checkSabotagesUnlocked = useCallback((currentTime: number, totalTime: number) => {
@@ -162,6 +163,11 @@ export const useGameSession = (matchId?: string) => {
     });
 
     // Subscribe to Realtime Updates immediately
+    // Store channel in a ref to clean up on subsequent loads
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+
     const channel = supabase
       .channel(`match-${matchId}`)
       .on(
@@ -204,6 +210,8 @@ export const useGameSession = (matchId?: string) => {
       .subscribe();
 
 
+    channelRef.current = channel;
+
     // SECONDARY: Fetch profiles for all players (less time critical)
     const { data: profiles } = await supabase
       .from('profiles')
@@ -238,8 +246,12 @@ export const useGameSession = (matchId?: string) => {
 
     setIsLoading(false);
 
+    // Clean up function just for component unmount
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [matchId, user, calculateTimeRemaining]);
 
@@ -361,66 +373,70 @@ export const useGameSession = (matchId?: string) => {
 
   // Timer effect
   useEffect(() => {
-    if (gameState.isRunning) {
-      timerRef.current = setInterval(() => {
-        setGameState((prev) => {
-          if (!prev._raw?.startedAt) {
-            // Fallback if no start time: manual decrement (for demo/practice)
-            const newMyTime = prev.isMyTurn ? prev.myTeamTime - 1 : prev.myTeamTime;
-            // For practice mode, enemy might not tick? Or should?
-            // Assuming practice doesn't use startedAt from DB usually.
-            return {
-              ...prev,
-              myTeamTime: Math.max(0, newMyTime),
-              // Enemy time static in practice? Or simulate tick?
-              enemyTeamTime: Math.max(0, prev.enemyTeamTime - (prev.isMyTurn ? 1 : 0)),
-            };
+    if (!gameState.isRunning) return;
+
+    let lastMyTime = gameState.myTeamTime;
+    let lastEnemyTime = gameState.enemyTeamTime;
+
+    timerRef.current = setInterval(() => {
+      setGameState((prev) => {
+        let newMyTime = prev.myTeamTime;
+        let newEnemyTime = prev.enemyTeamTime;
+
+        if (!prev._raw?.startedAt) {
+          // Fallback if no start time: manual decrement (for demo/practice)
+          newMyTime = prev.isMyTurn ? prev.myTeamTime - 1 : prev.myTeamTime;
+          newMyTime = Math.max(0, newMyTime);
+          newEnemyTime = Math.max(0, prev.enemyTeamTime - (prev.isMyTurn ? 1 : 0));
+        } else {
+          // Real Match: Calculate from database state
+          newMyTime = calculateTimeRemaining(prev.matchDuration, prev._raw.startedAt, prev._raw.myPenalties);
+          newEnemyTime = calculateTimeRemaining(prev.matchDuration, prev._raw.startedAt, prev._raw.enemyPenalties);
+        }
+
+        const sabotagesUnlocked = checkSabotagesUnlocked(
+          Math.min(newMyTime, newEnemyTime),
+          prev.matchDuration
+        );
+
+        // Check Win/Loss Condition
+        if (newMyTime <= 0 && newEnemyTime > 0) {
+          if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+            finishMatch(prev._raw?.isTeamA ? 'team_b' : 'team_a');
           }
-
-          // Real Match: Calculate from database state (Drift-free)
-          const newMyTime = calculateTimeRemaining(prev.matchDuration, prev._raw.startedAt, prev._raw.myPenalties);
-          const newEnemyTime = calculateTimeRemaining(prev.matchDuration, prev._raw.startedAt, prev._raw.enemyPenalties);
-
-          const sabotagesUnlocked = checkSabotagesUnlocked(
-            Math.min(newMyTime, newEnemyTime),
-            prev.matchDuration
-          );
-
-          // Check Win/Loss Condition
-          if (newMyTime <= 0 && newEnemyTime > 0) {
-            // My team ran out of time -> Enemy wins
-            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
-              finishMatch(prev._raw.isTeamA ? 'team_b' : 'team_a');
-            }
-          } else if (newEnemyTime <= 0 && newMyTime > 0) {
-            // Enemy team ran out of time -> My team wins
-            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
-              finishMatch(prev._raw.isTeamA ? 'team_a' : 'team_b');
-            }
-          } else if (newMyTime <= 0 && newEnemyTime <= 0) {
-            // Draw scenario (edge case). Let's just give it to Team A or handle differently.
-            // For now, Team A wins ties to keep it simple.
-            if (!prev.isFinishing && prev.matchStatus !== 'completed') {
-              finishMatch('team_a');
-            }
+        } else if (newEnemyTime <= 0 && newMyTime > 0) {
+          if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+            finishMatch(prev._raw?.isTeamA ? 'team_a' : 'team_b');
           }
+        } else if (newMyTime <= 0 && newEnemyTime <= 0) {
+          if (!prev.isFinishing && prev.matchStatus !== 'completed') {
+            finishMatch('team_a');
+          }
+        }
 
-          return {
-            ...prev,
-            myTeamTime: newMyTime,
-            enemyTeamTime: newEnemyTime,
-            sabotagesUnlocked,
-          };
-        });
-      }, 1000);
-    }
+        // Only return a new object if time actually changed to prevent React rendering glitches
+        if (newMyTime === lastMyTime && newEnemyTime === lastEnemyTime && prev.sabotagesUnlocked === sabotagesUnlocked) {
+          return prev;
+        }
+
+        lastMyTime = newMyTime;
+        lastEnemyTime = newEnemyTime;
+
+        return {
+          ...prev,
+          myTeamTime: newMyTime,
+          enemyTeamTime: newEnemyTime,
+          sabotagesUnlocked,
+        };
+      });
+    }, 1000);
 
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
-  }, [gameState.isRunning, checkSabotagesUnlocked]);
+  }, [gameState.isRunning, checkSabotagesUnlocked, calculateTimeRemaining, finishMatch]);
 
   // Load match data on mount
   useEffect(() => {
