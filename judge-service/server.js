@@ -136,11 +136,11 @@ except:
         let stdoutData = '';
         let stderrData = '';
 
-        // Timeout (3 seconds limit)
+        // Timeout (15 seconds for the whole runner — individual tests have 3s each)
         const timeout = setTimeout(() => {
             pythonProcess.kill('SIGKILL');
-            resolve({ error: 'Time Limit Exceeded (TLE).' });
-        }, 3000);
+            resolve({ error: 'Time Limit Exceeded (TLE). The overall execution took too long.' });
+        }, 15000);
 
         pythonProcess.stdout.on('data', (data) => {
             stdoutData += data.toString();
@@ -150,20 +150,22 @@ except:
             stderrData += data.toString();
         });
 
-        pythonProcess.on('close', (code) => {
+        pythonProcess.on('close', (exitCode) => {
             clearTimeout(timeout);
             const output = stdoutData + stderrData;
-            const jsonMatch = output.match(/===JSON_START===([\\s\\S]*?)===JSON_END===/);
+            const jsonMatch = output.match(/===JSON_START===([\s\S]*?)===JSON_END===/);
 
             if (jsonMatch && jsonMatch[1]) {
                 try {
-                    const parsed = JSON.parse(jsonMatch[1]);
+                    const parsed = JSON.parse(jsonMatch[1].trim());
                     resolve(parsed);
                 } catch (e) {
-                    resolve({ error: 'Failed to parse JSON output.' });
+                    resolve({ error: 'Failed to parse judge JSON output. Raw: ' + jsonMatch[1].substring(0, 300) });
                 }
             } else {
-                resolve({ error: 'Execution Error. Raw Output:\\n' + output.substring(0, 500) });
+                // Surface the real error so the frontend can display it
+                const errorSnippet = output.substring(0, 500) || '(no output from runner)';
+                resolve({ error: 'Runner error (exit ' + exitCode + '):\n' + errorSnippet });
             }
         });
 
