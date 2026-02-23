@@ -35,39 +35,18 @@ async function processSubmission(code, testCases) {
 import json
 import sys
 import time
-import traceback
-import tempfile
+import subprocess
 import os
+import tempfile
 
 user_code = """${code.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")}"""
 
-# Write user code to a temporary module to allow proper importing
+# Write user code to a temporary file
 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
     f.write(user_code)
     temp_module = f.name
 
-module_dir = os.path.dirname(temp_module)
-module_name = os.path.basename(temp_module)[:-3]
-
-if module_dir not in sys.path:
-    sys.path.insert(0, module_dir)
-
-try:
-    solution_module = __import__(module_name)
-    solution = getattr(solution_module, 'solution')
-except AttributeError:
-    print("===JSON_START===")
-    print(json.dumps({"error": "Function 'solution' not found in your code."}))
-    print("===JSON_END===")
-    os.remove(temp_module)
-    sys.exit(0)
-except Exception as e:
-    print("===JSON_START===")
-    print(json.dumps({"error": "Syntax or Runtime Error.\\n" + traceback.format_exc()}))
-    print("===JSON_END===")
-    os.remove(temp_module)
-    sys.exit(0)
-
+# Read test cases from stdin
 raw_input = sys.stdin.read()
 try:
     test_cases = json.loads(raw_input)
@@ -78,22 +57,38 @@ results = []
 all_passed = True
 
 for i, tc in enumerate(test_cases):
-    inp_val = tc.get("input")
+    inp_val = str(tc.get("input", ""))
     expected_out = str(tc.get("output", "")).strip()
     
+    start_time = time.time()
+    
     try:
-        # Try to parse input logically (e.g. lists, dicts, numbers)
-        try:
-            inp = eval(inp_val)
-        except:
-            inp = inp_val
-            
-        start_time = time.time()
-        result_raw = solution(inp)
+        # Run the script as a subprocess, passing input via stdin
+        process = subprocess.run(
+            [sys.executable, temp_module],
+            input=inp_val,
+            text=True,
+            capture_output=True,
+            timeout=3.0 # 3 second timeout for individual test case
+        )
         exec_time = time.time() - start_time
         
-        actual_out = str(result_raw).strip()
-        
+        # Check for runtime errors
+        if process.returncode != 0:
+            error_msg = process.stderr.strip()
+            if not error_msg:
+                error_msg = f"Process exited with code {process.returncode}"
+            
+            all_passed = False
+            results.append({
+                "test_idx": i,
+                "status": "Runtime Error",
+                "error_message": error_msg
+            })
+            continue
+
+        # Check outcome
+        actual_out = process.stdout.strip()
         passed = actual_out == expected_out
         if not passed:
             all_passed = False
@@ -106,6 +101,13 @@ for i, tc in enumerate(test_cases):
             "time_ms": round(exec_time * 1000, 2)
         })
 
+    except subprocess.TimeoutExpired:
+        all_passed = False
+        results.append({
+            "test_idx": i,
+            "status": "Time Limit Exceeded",
+            "error_message": "Execution timed out (3.0s)"
+        })
     except Exception as e:
         all_passed = False
         results.append({
