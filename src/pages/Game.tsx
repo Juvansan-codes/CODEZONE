@@ -87,7 +87,9 @@ const Game: React.FC = () => {
 
   // Audio Instance
   const [audio] = useState(() => {
-    const a = new Audio('/game-music.mp3');
+    // Determine the base path based on environment variables or Vite config
+    const basePath = import.meta.env.BASE_URL || '/';
+    const a = new Audio(`${basePath}game-music.mp3`);
     a.loop = true;
     return a;
   });
@@ -103,7 +105,11 @@ const Game: React.FC = () => {
     if (settings.bgmEnabled) {
       if (audio.paused) {
         audio.play().catch(error => {
-          console.error("Audio play failed:", error);
+          // Autoplay is blocked by default in modern browsers until user interacts with the document.
+          // Silently ignore this specific error to avoid console spam.
+          if (error.name !== 'NotAllowedError') {
+            console.error("Audio play failed:", error);
+          }
         });
       }
     } else {
