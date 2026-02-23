@@ -118,25 +118,10 @@ const Game: React.FC = () => {
     };
   }, [audio, settings.bgmEnabled, settings.musicVolume]);
 
-  // Initialize Pyodide
-  useEffect(() => {
-    const initPyodide = async () => {
-      try {
-        if (window.loadPyodide) {
-          const pyodideInstance = await window.loadPyodide();
-          setPyodide(pyodideInstance);
-          setIsPyodideReady(true);
-          addLog('Python environment loaded successfully');
-        } else {
-          setTimeout(initPyodide, 500);
-        }
-      } catch (err) {
-        console.error('Failed to load Pyodide', err);
-        addLog('Failed to load Python environment');
-      }
-    };
-    initPyodide();
-  }, [addLog]);
+  // Pyodide is no longer used natively here as execution moved to backend
+  // useEffect(() => {
+  //  // ...
+  // }, []);
 
 
 
@@ -166,93 +151,78 @@ const Game: React.FC = () => {
     fetchQuestions();
   }, []);
 
-  const runCode = async () => {
-    setConsoleOutput([]); // Clear previous output
-
-    if (!pyodide || !isPyodideReady) {
-      toast.error('⏳ Python is still loading...');
-      return;
+  const validateCode = () => {
+    if (!code || code.trim() === '') {
+      toast.error('❌ Submission rejected: Code cannot be empty.');
+      return false;
     }
+    if (code.trim().length < 5) {
+      toast.error('❌ Submission rejected: Code is too short.');
+      return false;
+    }
+    return true;
+  };
+
+  const [isExecuting, setIsExecuting] = useState(false);
+
+  const runCode = async () => {
+    if (!validateCode()) return;
+
+    setConsoleOutput([]); // Clear previous output
+    setIsExecuting(true);
+    addLog('Executing code on secure backend...');
 
     try {
-      // Capture stdout
-      pyodide.setStdout({
-        batched: (msg: string) => {
-          setConsoleOutput(prev => [...prev, { type: 'log', content: msg }]);
-        }
+      const response = await fetch('http://localhost:3001/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          testCases: question.test_cases || []
+        })
       });
 
-      // 1. Run User Code to define functions
-      await pyodide.runPythonAsync(code);
+      const data = await response.json();
 
-      // 2. Run Test Cases
-      const testCases = question.test_cases as any[];
-      if (testCases && testCases.length > 0) {
-        let allPassed = true;
+      if (data.error) {
+        setConsoleOutput([{ type: 'error', content: data.error }]);
+        toast.error('❌ VALIDATION FAILED');
+      } else {
+        // Render test case results
+        let outputLines = [];
+        data.results.forEach((res: any) => {
+          outputLines.push(`Test ${res.test_idx + 1}: ${res.status}`);
+          if (res.status !== 'Passed') {
+            if (res.error_message) outputLines.push(`  Error: ${res.error_message}`);
+            else outputLines.push(`  Expected: ${res.expected_output} | Got: ${res.actual_output}`);
+          }
+          outputLines.push(`  Time: ${res.time_ms}ms`);
+        });
 
-        for (const testCase of testCases) {
-          const inputVal = testCase.input;
-          const expectedOut = testCase.output;
+        setConsoleOutput([{ type: 'log', content: outputLines.join('\\n') }]);
 
-          // Construct python call: solution(input)
-          // We assume input is valid python literal if possible, or string.
-          // To be safe, let's treat input as code to evaluate if it looks like a number/list, or string.
-          // Actually, let's pass it as a JSON string and parse it in Python to be robust.
-
-          const testRunner = `
-import json
-try:
-    # Attempt to use 'solution' function
-    if 'solution' not in globals():
-        print("Error: Function 'solution' not found. Please define 'def solution(arg):'")
-        raise Exception("Function missing")
-        
-    # Prepare input
-    inp_str = '${inputVal.replace(/'/g, "\\'")}'
-    # Try to eval input safely, or just treat as string
-    try:
-        inp = eval(inp_str)
-    except:
-        inp = inp_str
-        
-    result = solution(inp)
-    print(f"Input: {inp} | Output: {result}")
-    
-    # Check result
-    if str(result) == '${expectedOut}':
-        print("✅ Passed")
-    else:
-        print(f"❌ Failed. Expected: ${expectedOut}")
-        raise Exception("Test failed")
-        
-except Exception as e:
-    print(f"Error: {e}")
-    raise e
-`;
-          await pyodide.runPythonAsync(testRunner);
-        }
-
-        if (allPassed) {
-          // If all tests passed, we instantly WIN by deducting an enormous amount of time from the enemy
-          // or we can just call finishMatch directly. Let's just deduct a massive amount so the timer naturally drops
-          // and triggers the win condition in the hook.
+        if (data.all_passed) {
           deductEnemyTime(99999);
           toast.success('🔥 CODE PERFECT! CRITICAL HIT!');
           addLog('Code submitted and passed all tests! Enemy obliterated!');
+        } else {
+          toast.error('❌ Some tests failed.');
         }
-      } else {
-        // No test cases, just run
-        deductEnemyTime(5);
-        toast.success('⚠️ Code ran (No tests defined)');
       }
-
     } catch (err: any) {
-      // setConsoleOutput(prev => [...prev, { type: 'error', content: err.toString() }]); // Don't duplicate if python printed error
-      toast.error('❌ VALIDATION FAILED');
+      setConsoleOutput([{ type: 'error', content: 'Failed to connect to judge service.' }]);
+      toast.error('❌ SERVER ERROR');
+    } finally {
+      setIsExecuting(false);
     }
   };
 
   const submitCode = () => {
+    if (!validateCode()) return;
+
+    // In a real scenario, submitCode might be exactly the same as runCode
+    // but without showing the outputs, or it enforces passing all tests first.
+    // For now, let's just trigger the massive damage.
     deductEnemyTime(30);
     toast.success('💥 FINISHER! Enemy -30s');
     addLog('Submission landed — massive damage!');
@@ -348,7 +318,7 @@ except Exception as e:
       {isMatchCompleted && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
           <div className={`relative overflow-hidden border p-1 rounded-3xl max-w-lg w-full text-center shadow-2xl ${isWinner ? 'bg-gradient-to-br from-gold/50 via-yellow-600/20 to-transparent border-gold/50 shadow-gold/20'
-              : 'bg-gradient-to-br from-red-600/50 via-red-900/20 to-transparent border-red-500/50 shadow-red-500/20'
+            : 'bg-gradient-to-br from-red-600/50 via-red-900/20 to-transparent border-red-500/50 shadow-red-500/20'
             }`}>
             <div className="bg-surface/90 backdrop-blur-xl p-8 rounded-[22px] space-y-6">
 
@@ -390,7 +360,7 @@ except Exception as e:
                 <Button
                   onClick={() => navigate('/lobby')}
                   className={`w-full h-14 text-lg font-bold tracking-widest uppercase transition-all hover:scale-[1.02] ${isWinner ? 'bg-gold hover:bg-gold/90 text-black shadow-[0_0_20px_rgba(251,191,36,0.4)]'
-                      : 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]'
+                    : 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]'
                     }`}
                 >
                   Return to Lobby
@@ -570,9 +540,9 @@ except Exception as e:
                   <Terminal size={14} />
                   <span>PYTHON CONSOLE OUTPUT</span>
                 </div>
-                {!isPyodideReady && (
+                {isExecuting && (
                   <span className="flex items-center gap-1 text-accent text-[10px]">
-                    <Loader2 className="animate-spin w-3 h-3" /> Loading Python...
+                    <Loader2 className="animate-spin w-3 h-3" /> Executing on Judge...
                   </span>
                 )}
               </div>
@@ -594,10 +564,10 @@ except Exception as e:
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={runCode} className="bg-primary hover:bg-primary/80 gap-2">
+            <Button onClick={runCode} disabled={isExecuting} className="bg-primary hover:bg-primary/80 gap-2">
               <Play size={16} fill="currentColor" /> RUN CODE
             </Button>
-            <Button onClick={submitCode} className="bg-gold text-gold-foreground hover:bg-gold/80 gap-2">
+            <Button onClick={submitCode} disabled={isExecuting} className="bg-gold text-gold-foreground hover:bg-gold/80 gap-2">
               <CheckCircle2 size={16} /> SUBMIT
             </Button>
             <Button variant="outline" onClick={handleExitMatch} className="gap-2">
