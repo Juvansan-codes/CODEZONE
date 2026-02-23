@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://juvansan-codes.github.io/CODEZONE/",
+  "homepage": "https://abishekjoseph9b-star.github.io/CODEZONE/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
