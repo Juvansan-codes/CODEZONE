@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useGameSession, TeamSize } from '@/hooks/useGameSession';
+import { usePyodide } from '@/hooks/usePyodide';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -83,7 +84,9 @@ const Game: React.FC = () => {
   });
   const [memeCooldown, setMemeCooldown] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
+  const [customInput, setCustomInput] = useState('');
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const { runPython, isInitializing: isPyodideLoading } = usePyodide();
 
   // Audio Instance
   const [audio] = useState(() => {
@@ -163,9 +166,43 @@ const Game: React.FC = () => {
   const runCode = async () => {
     if (!validateCode()) return;
 
+    if (isPyodideLoading) {
+      toast.warning('Wait! Python local environment is still loading...');
+      return;
+    }
+
     setConsoleOutput([]); // Clear previous output
     setIsExecuting(true);
-    addLog('Executing code on secure backend...');
+    addLog('Running preview locally (Pyodide)...');
+
+    try {
+      const startTime = performance.now();
+      const result = await runPython(code, customInput);
+      const execTimeMs = (performance.now() - startTime).toFixed(2);
+
+      if (result.isTimeout) {
+        setConsoleOutput([{ type: 'error', content: '❌ Time Limit Exceeded (Infinite loop detected)' }]);
+        toast.error('Local Timeout.');
+      } else if (result.error) {
+        setConsoleOutput([{ type: 'error', content: result.error }]);
+        toast.error('Runtime Error in Preview');
+      } else {
+        setConsoleOutput([{ type: 'log', content: result.output || '(No output)' }]);
+        toast.success(`Ran in ${execTimeMs}ms (Not Validated)`);
+      }
+    } catch (err: any) {
+      setConsoleOutput([{ type: 'error', content: 'Local execution failed.' }]);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const submitCode = async () => {
+    if (!validateCode()) return;
+
+    setConsoleOutput([]); // Clear previous output
+    setIsExecuting(true);
+    addLog('Submitting to secure backend judge...');
 
     try {
       const response = await fetch('http://localhost:3001/api/submit', {
@@ -181,7 +218,7 @@ const Game: React.FC = () => {
 
       if (data.error) {
         setConsoleOutput([{ type: 'error', content: data.error }]);
-        toast.error('❌ VALIDATION FAILED');
+        toast.error('❌ VALIDATION SERVER ERROR');
       } else {
         // Render test case results
         let outputLines = [];
@@ -197,8 +234,8 @@ const Game: React.FC = () => {
         setConsoleOutput([{ type: 'log', content: outputLines.join('\\n') }]);
 
         if (data.all_passed) {
-          deductEnemyTime(99999);
-          toast.success('🔥 CODE PERFECT! CRITICAL HIT!');
+          deductEnemyTime(30);
+          toast.success('🔥 CODE PERFECT! CRITICAL HIT! -30s');
           addLog('Code submitted and passed all tests! Enemy obliterated!');
         } else {
           toast.error('❌ Some tests failed.');
@@ -210,17 +247,6 @@ const Game: React.FC = () => {
     } finally {
       setIsExecuting(false);
     }
-  };
-
-  const submitCode = () => {
-    if (!validateCode()) return;
-
-    // In a real scenario, submitCode might be exactly the same as runCode
-    // but without showing the outputs, or it enforces passing all tests first.
-    // For now, let's just trigger the massive damage.
-    deductEnemyTime(30);
-    toast.success('💥 FINISHER! Enemy -30s');
-    addLog('Submission landed — massive damage!');
   };
 
   const useSabotage = (type: 'fog' | 'invert' | 'shake') => {
@@ -525,8 +551,21 @@ const Game: React.FC = () => {
               className={`w-full h-[300px] bg-[#1e1e1e] border border-border rounded-xl p-4 font-mono text-sm text-green-400 resize-none focus:outline-none focus:ring-2 focus:ring-primary ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''
                 }`}
               spellCheck={false}
-              placeholder="# Write your Python solution here..."
+              placeholder="# Write your Python script here..."
             />
+
+            {/* Custom Input Panel */}
+            <div className="bg-[#0c0c0c] border border-border rounded-xl p-3 h-[70px] overflow-hidden">
+              <div className="flex justify-between items-center text-muted-foreground mb-1 text-xs px-1">
+                <span>CUSTOM STDIN (For Preview RUN only)</span>
+              </div>
+              <textarea
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                className="w-full h-full bg-transparent border-none text-xs text-muted-foreground resize-none focus:outline-none"
+                placeholder="Paste custom input here..."
+              />
+            </div>
 
             {/* Console Output Panel */}
             <div className="bg-[#0c0c0c] border border-border rounded-xl p-3 h-[150px] overflow-y-auto font-mono text-xs">

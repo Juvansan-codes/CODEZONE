@@ -1,273 +1,101 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-interface PyodideInstance {
-  runPython: (code: string) => any;
-  runPythonAsync: (code: string) => Promise<any>;
-  loadPackage: (packages: string | string[]) => Promise<void>;
-  globals: any;
-}
-
-interface TestCase {
-  input: string;
-  expected: string;
-  description?: string;
-}
-
-interface TestResult {
-  passed: boolean;
-  input: string;
-  expected: string;
-  actual: string;
-  error?: string;
-  executionTime: number;
-}
-
-interface ExecutionResult {
+interface PyodideResult {
   output: string;
-  error: string | null;
-  executionTime: number;
-  testResults?: TestResult[];
+  error?: string;
+  isTimeout?: boolean;
 }
 
-export const usePyodide = () => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [isReady, setIsReady] = useState(false);
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const pyodideRef = useRef<PyodideInstance | null>(null);
+export function usePyodide() {
+  const [isInitializing, setIsInitializing] = useState(true);
+  const workerRef = useRef<Worker | null>(null);
 
-  // Load Pyodide
   useEffect(() => {
-    const loadPyodide = async () => {
-      try {
-        setIsLoading(true);
-        setLoadingProgress(10);
+    // Determine base URL dynamically (for GitHub Pages compatibility)
+    const basePath = import.meta.env.BASE_URL || '/';
 
-        // Load the Pyodide script
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js';
-        
-        await new Promise<void>((resolve, reject) => {
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error('Failed to load Pyodide'));
-          document.head.appendChild(script);
-        });
+    // Initialize the WebWorker
+    const worker = new Worker(`${basePath}pyodideWorker.js`);
+    workerRef.current = worker;
 
-        setLoadingProgress(40);
+    // We can't strictly know when Pyodide finishes loading inside the worker just from instantiation,
+    // but the worker script immediately starts downloading it. We'll set initializing to false after a slight delay
+    // or we could add a specific message from the worker.
 
-        // Initialize Pyodide
-        const pyodide = await (window as any).loadPyodide({
-          indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/',
-        });
-
-        setLoadingProgress(80);
-
-        // Set up stdout/stderr capture
-        await pyodide.runPythonAsync(`
-import sys
-from io import StringIO
-
-class CaptureOutput:
-    def __init__(self):
-        self.stdout = StringIO()
-        self.stderr = StringIO()
-        
-    def capture(self):
-        sys.stdout = self.stdout
-        sys.stderr = self.stderr
-        
-    def release(self):
-        sys.stdout = sys.__stdout__
-        sys.stderr = sys.__stderr__
-        
-    def get_output(self):
-        return self.stdout.getvalue()
-        
-    def get_error(self):
-        return self.stderr.getvalue()
-        
-    def clear(self):
-        self.stdout = StringIO()
-        self.stderr = StringIO()
-        sys.stdout = self.stdout
-        sys.stderr = self.stderr
-
-_capture = CaptureOutput()
-        `);
-
-        setLoadingProgress(100);
-        pyodideRef.current = pyodide;
-        setIsReady(true);
-        setIsLoading(false);
-      } catch (err) {
-        console.error('Failed to load Pyodide:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load Python');
-        setIsLoading(false);
+    const handleInitMessage = (e: MessageEvent) => {
+      if (e.data.type === 'ready') {
+        setIsInitializing(false);
       }
-    };
+    }
+    worker.addEventListener('message', handleInitMessage);
 
-    loadPyodide();
+    // Fallback: assume it's loading in the background. It will queue commands if not ready.
+    setTimeout(() => setIsInitializing(false), 2000);
 
     return () => {
-      // Cleanup
-      pyodideRef.current = null;
+      worker.terminate();
+      workerRef.current = null;
     };
   }, []);
 
-  // Execute Python code
-  const runCode = useCallback(async (code: string): Promise<ExecutionResult> => {
-    if (!pyodideRef.current || !isReady) {
-      return {
-        output: '',
-        error: 'Python environment not ready',
-        executionTime: 0,
-      };
-    }
-
-    const startTime = performance.now();
-
-    try {
-      // Capture output
-      await pyodideRef.current.runPythonAsync(`
-_capture.clear()
-_capture.capture()
-      `);
-
-      // Run user code
-      await pyodideRef.current.runPythonAsync(code);
-
-      // Get output
-      const output = await pyodideRef.current.runPythonAsync(`
-_capture.release()
-_capture.get_output()
-      `);
-
-      const errorOutput = await pyodideRef.current.runPythonAsync(`
-_capture.get_error()
-      `);
-
-      const executionTime = performance.now() - startTime;
-
-      return {
-        output: output || '',
-        error: errorOutput || null,
-        executionTime,
-      };
-    } catch (err) {
-      const executionTime = performance.now() - startTime;
-      
-      // Release capture on error
-      try {
-        await pyodideRef.current.runPythonAsync('_capture.release()');
-      } catch {}
-
-      return {
-        output: '',
-        error: err instanceof Error ? err.message : String(err),
-        executionTime,
-      };
-    }
-  }, [isReady]);
-
-  // Run code with test cases
-  const runWithTests = useCallback(async (
-    code: string,
-    testCases: TestCase[],
-    functionName: string
-  ): Promise<ExecutionResult> => {
-    if (!pyodideRef.current || !isReady) {
-      return {
-        output: '',
-        error: 'Python environment not ready',
-        executionTime: 0,
-        testResults: [],
-      };
-    }
-
-    const startTime = performance.now();
-    const testResults: TestResult[] = [];
-
-    try {
-      // First, define the user's function
-      await pyodideRef.current.runPythonAsync(code);
-
-      // Run each test case
-      for (const testCase of testCases) {
-        const testStart = performance.now();
-        
-        try {
-          // Prepare input and call function
-          const testCode = `
-result = ${functionName}(${testCase.input})
-str(result)
-          `;
-
-          const result = await pyodideRef.current.runPythonAsync(testCode);
-          const actual = String(result);
-          const expected = testCase.expected.trim();
-          const passed = actual.trim() === expected;
-
-          testResults.push({
-            passed,
-            input: testCase.input,
-            expected,
-            actual,
-            executionTime: performance.now() - testStart,
-          });
-        } catch (err) {
-          testResults.push({
-            passed: false,
-            input: testCase.input,
-            expected: testCase.expected,
-            actual: '',
-            error: err instanceof Error ? err.message : String(err),
-            executionTime: performance.now() - testStart,
-          });
+  const runPython = useCallback(
+    (code: string, inputData: string = '', timeoutMs: number = 5000): Promise<PyodideResult> => {
+      return new Promise((resolve) => {
+        if (!workerRef.current) {
+          resolve({ output: '', error: 'Worker not initialized' });
+          return;
         }
-      }
 
-      const allPassed = testResults.every(r => r.passed);
-      const passedCount = testResults.filter(r => r.passed).length;
+        const id = Math.random().toString(36).substring(7);
+        let outputBuffer = '';
+        let errorBuffer = '';
 
-      return {
-        output: `${passedCount}/${testResults.length} tests passed`,
-        error: allPassed ? null : 'Some tests failed',
-        executionTime: performance.now() - startTime,
-        testResults,
-      };
-    } catch (err) {
-      return {
-        output: '',
-        error: err instanceof Error ? err.message : String(err),
-        executionTime: performance.now() - startTime,
-        testResults: [],
-      };
-    }
-  }, [isReady]);
+        const timeoutId = setTimeout(() => {
+          // Terminate the worker if it takes too long (infinite loop)
+          if (workerRef.current) {
+            workerRef.current.terminate();
 
-  // Reset the Python environment
-  const reset = useCallback(async () => {
-    if (!pyodideRef.current) return;
+            // Re-initialize the worker for future runs
+            const basePath = import.meta.env.BASE_URL || '/';
+            workerRef.current = new Worker(`${basePath}pyodideWorker.js`);
 
-    try {
-      await pyodideRef.current.runPythonAsync(`
-# Clear user-defined variables
-for name in list(globals().keys()):
-    if not name.startswith('_') and name not in ['sys', 'StringIO', 'CaptureOutput']:
-        del globals()[name]
-      `);
-    } catch (err) {
-      console.error('Failed to reset Python environment:', err);
-    }
-  }, []);
+            resolve({
+              output: outputBuffer,
+              error: 'Time Limit Exceeded (Infinite loop detected)',
+              isTimeout: true,
+            });
+          }
+        }, timeoutMs);
 
-  return {
-    isLoading,
-    isReady,
-    loadingProgress,
-    error,
-    runCode,
-    runWithTests,
-    reset,
-  };
-};
+        const handleMessage = (e: MessageEvent) => {
+          const { type, text, id: msgId } = e.data;
+
+          if (type === 'stdout') {
+            outputBuffer += text;
+          } else if (type === 'stderr') {
+            errorBuffer += text;
+          } else if (type === 'error' && msgId === id) {
+            clearTimeout(timeoutId);
+            workerRef.current?.removeEventListener('message', handleMessage);
+            resolve({ output: outputBuffer, error: errorBuffer || text });
+          } else if (type === 'done' && msgId === id) {
+            clearTimeout(timeoutId);
+            workerRef.current?.removeEventListener('message', handleMessage);
+            resolve({ output: outputBuffer, error: errorBuffer || undefined });
+          }
+        };
+
+        workerRef.current.addEventListener('message', handleMessage);
+
+        workerRef.current.postMessage({
+          id,
+          python_code: code,
+          input_data: inputData,
+        });
+      });
+    },
+    []
+  );
+
+  return { runPython, isInitializing };
+}
