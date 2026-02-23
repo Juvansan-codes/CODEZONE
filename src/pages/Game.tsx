@@ -7,7 +7,7 @@ import { usePyodide } from '@/hooks/usePyodide';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Terminal, Play, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { Terminal, Play, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -541,6 +541,43 @@ const Game: React.FC = () => {
           <div className="glass-panel p-4 mb-3">
             <h2 className="font-bold text-lg">{question.title}</h2>
             <p className="text-sm text-muted-foreground">{question.description}</p>
+
+            {/* Sample Test Cases */}
+            {(() => {
+              let testCases: any[] = [];
+              try {
+                const raw = question.test_cases;
+                if (Array.isArray(raw)) testCases = raw;
+                else if (typeof raw === 'string') testCases = JSON.parse(raw);
+              } catch { /* invalid JSON — show nothing */ }
+
+              const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
+
+              if (visible.length === 0) return null;
+
+              return (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Sample Test Cases</p>
+                  <div className="space-y-2">
+                    {visible.map((tc: any, i: number) => (
+                      <div key={i} className="grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-[10px] text-muted-foreground uppercase">Input {i + 1}</span>
+                          <pre className="bg-[#1e1e1e] rounded-lg p-2 text-xs text-green-300 font-mono whitespace-pre-wrap mt-0.5 min-h-[28px]">{String(tc.input ?? '')}</pre>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-muted-foreground uppercase">Output {i + 1}</span>
+                          <pre className="bg-[#1e1e1e] rounded-lg p-2 text-xs text-yellow-300 font-mono whitespace-pre-wrap mt-0.5 min-h-[28px]">{String(tc.output ?? '')}</pre>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {testCases.some((tc: any) => tc && tc.visible === false) && (
+                    <p className="text-[10px] text-muted-foreground mt-2 italic">+ hidden test cases evaluated on submit</p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="relative mb-3 flex-1 flex flex-col gap-3">

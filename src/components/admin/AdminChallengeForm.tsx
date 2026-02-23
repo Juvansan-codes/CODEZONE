@@ -170,7 +170,10 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
 
                 <div className="space-y-2">
                     <Label>Test Cases (JSON Format)</Label>
-                    <p className="text-xs text-muted-foreground">Example: {'[{"input": "5", "output": "120"}]'}</p>
+                    <p className="text-xs text-muted-foreground">
+                        Example: {'[{"input": "5", "output": "120"}, {"input": "10", "output": "3628800", "visible": false}]'}
+                    </p>
+                    <p className="text-xs text-muted-foreground/60">Add <code className="text-accent">"visible": false</code> to hide a test case from players. Default is visible.</p>
                     <Textarea
                         className="font-mono min-h-[150px]"
                         value={formData.test_cases}
