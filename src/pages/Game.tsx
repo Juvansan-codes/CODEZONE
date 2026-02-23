@@ -280,9 +280,9 @@ const Game: React.FC = () => {
 
   const handleExitMatch = async () => {
     if (gameState.isRunning && !isMatchCompleted) {
-      if (confirm('⚠️ WARNING: Exiting the match will count as a SURRENDER. You will lose progress. Are you sure?')) {
+      if (confirm('⚠️ WARNING: Exiting the match will count as a SURRENDER.\\n\\nYou will lose 20 XP. Are you sure?')) {
         await surrenderMatch();
-        toast.info('You have surrendered the match.');
+        toast.info('You threw in the towel. -20 XP');
         navigate('/lobby');
       }
     } else {
