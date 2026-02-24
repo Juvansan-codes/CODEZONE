@@ -205,7 +205,8 @@ const Game: React.FC = () => {
     addLog('Submitting to secure backend judge...');
 
     try {
-      const response = await fetch('http://localhost:3001/api/submit', {
+      const judgeUrl = import.meta.env.VITE_JUDGE_URL || 'http://localhost:3001';
+      const response = await fetch(`${judgeUrl}/api/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
