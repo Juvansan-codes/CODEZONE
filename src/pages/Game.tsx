@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Terminal, Play, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { getRankFromXP } from '@/lib/utils';
 
 declare global {
   interface Window {
@@ -19,10 +20,7 @@ declare global {
 
 
 
-const RANKS = [
-  'Bronze Techie', 'Silver Debugger', 'Gold Architect', 'Platinum Engineer',
-  'Shadow Coder', 'Elite Exploiter', 'Cyber Overlord', 'Hacker Legend'
-];
+// Rank is now computed from XP via getRankFromXP() in utils.ts
 
 // Sabotage costs in seconds
 const SABOTAGE_COSTS = {

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthContext';
-import { getRankFromWins } from '@/lib/utils';
+import { getRankFromXP } from '@/lib/utils';
 
 export interface Friend {
   name: string;
@@ -21,8 +21,13 @@ export interface GameData {
   level: number;
   username: string;
   friends: Friend[];
+  xp: number;
   xpPercent: number;
+  xpToNextRank: number;
   rank: string;
+  rankColor: string;
+  rankEmoji: string;
+  nextRank: string;
   bestRank: string;
   stats: PlayerStats;
 }
@@ -55,19 +60,24 @@ interface GameContextType {
 }
 
 const defaultGameData: GameData = {
-  coins: 2450,
-  gems: 850,
+  coins: 0,
+  gems: 0,
   energy: 100,
-  level: 42,
-  username: 'CodeWarrior',
+  level: 1,
+  username: 'Player',
   friends: [],
-  xpPercent: 78,
-  rank: 'Grandmaster',
-  bestRank: 'Legend',
+  xp: 0,
+  xpPercent: 0,
+  xpToNextRank: 100,
+  rank: 'Bronze',
+  rankColor: '#cd7f32',
+  rankEmoji: '🥉',
+  nextRank: 'Silver',
+  bestRank: 'Bronze',
   stats: {
-    matches: 129,
-    wins: 54,
-    winRate: 41,
+    matches: 0,
+    wins: 0,
+    winRate: 0,
   },
 };
 
@@ -128,19 +138,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (data) console.log('GameContext: Got profile data', data);
 
       if (data && !error) {
+        const rawXp = typeof data.xp === 'number' ? data.xp : 0;
+        const rankInfo = getRankFromXP(rawXp);
+
         setGameData(prev => ({
           ...prev,
           username: data.username || user.email?.split('@')[0] || 'Player',
-          level: data.xp ? Math.floor(data.xp / 100) + 1 : prev.level,
-          xpPercent: typeof data.xp === 'number' ? (data.xp % 100) : prev.xpPercent,
+          xp: rawXp,
+          level: rankInfo.level,
+          xpPercent: rankInfo.progressPercent,
+          xpToNextRank: rankInfo.xpNeededForNextTier - rankInfo.xpInCurrentTier,
+          rank: rankInfo.rank.name,
+          rankColor: rankInfo.rank.color,
+          rankEmoji: rankInfo.rank.emoji,
+          nextRank: rankInfo.nextRank?.name || 'MAX',
+          bestRank: data.best_rank || rankInfo.rank.name,
           coins: data.coins ?? prev.coins,
           gems: data.gems ?? prev.gems,
-          rank: getRankFromWins(data.total_wins || 0),
           stats: {
             ...prev.stats,
             matches: data.total_matches || 0,
             wins: data.total_wins || 0,
-            // Calculate win rate
             winRate: data.total_matches > 0
               ? Math.round((data.total_wins / data.total_matches) * 100)
               : 0

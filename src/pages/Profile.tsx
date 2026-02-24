@@ -50,29 +50,64 @@ const Profile: React.FC = () => {
               </div>
               <div className="flex-1">
                 <h2 className="font-orbitron text-xl font-bold">{gameData.username}</h2>
-                <p className="text-sm text-muted-foreground">Leader • Cyber Unit</p>
-                <div className="mt-2 h-3 bg-surface rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary to-teal-300 transition-all duration-500"
-                    style={{ width: `${xpWidth}%` }}
-                  />
+                <p className="text-sm text-muted-foreground">
+                  Level {gameData.level} • {gameData.rank}
+                </p>
+                {/* XP Progress Bar */}
+                <div className="mt-2">
+                  <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                    <span style={{ color: gameData.rankColor }}>
+                      {gameData.rankEmoji} {gameData.rank}
+                    </span>
+                    <span>
+                      {gameData.xp} XP {gameData.nextRank !== 'MAX' && `→ ${gameData.nextRank}`}
+                    </span>
+                  </div>
+                  <div className="h-3 bg-surface rounded-full overflow-hidden border border-white/5">
+                    <div
+                      className="h-full transition-all duration-700 ease-out rounded-full"
+                      style={{
+                        width: `${xpWidth}%`,
+                        backgroundColor: gameData.rankColor,
+                        boxShadow: `0 0 8px ${gameData.rankColor}40`,
+                      }}
+                    />
+                  </div>
+                  {gameData.nextRank !== 'MAX' && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5 text-right">
+                      {gameData.xpToNextRank} XP to {gameData.nextRank}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Badges */}
             <div className="flex flex-wrap gap-2">
-              <span className="px-3 py-1.5 bg-surface border border-border rounded-full text-xs">🎖 Cyber Elite</span>
-              <span className="px-3 py-1.5 bg-surface border border-border rounded-full text-xs">🔥 Veteran</span>
-              <span className="px-3 py-1.5 bg-surface border border-border rounded-full text-xs">⚡ LVL {gameData.level}</span>
+              <span
+                className="px-3 py-1.5 rounded-full text-xs font-semibold border"
+                style={{
+                  borderColor: `${gameData.rankColor}40`,
+                  backgroundColor: `${gameData.rankColor}15`,
+                  color: gameData.rankColor,
+                }}
+              >
+                {gameData.rankEmoji} {gameData.rank}
+              </span>
+              <span className="px-3 py-1.5 bg-surface border border-border rounded-full text-xs">
+                ⚡ LVL {gameData.level}
+              </span>
+              <span className="px-3 py-1.5 bg-surface border border-border rounded-full text-xs">
+                🎯 {gameData.xp} XP
+              </span>
             </div>
 
             {/* Ranks */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-surface border border-border rounded-xl p-4 text-center hover:glow-primary transition-shadow">
                 <p className="text-xs text-muted-foreground mb-1">Current Rank</p>
-                <div className="text-3xl my-2">🏆</div>
-                <p className="font-bold">{gameData.rank}</p>
+                <div className="text-3xl my-2">{gameData.rankEmoji}</div>
+                <p className="font-bold" style={{ color: gameData.rankColor }}>{gameData.rank}</p>
               </div>
               <div className="bg-surface border border-border rounded-xl p-4 text-center hover:glow-primary transition-shadow">
                 <p className="text-xs text-muted-foreground mb-1">Highest Rank</p>
