@@ -9,6 +9,9 @@ import { useGame } from '@/contexts/GameContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Terminal, Play, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { getRankFromXP } from '@/lib/utils';
+import Editor from '@monaco-editor/react';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 declare global {
   interface Window {
@@ -321,7 +324,7 @@ const Game: React.FC = () => {
     }
   };
 
-  const currentRank = RANKS[Math.min(wins, RANKS.length - 1)];
+  const currentRank = getRankFromXP(profile?.xp || 0).rank;
 
   // Calculate progress percentages
   const myTimePercent = (gameState.myTeamTime / gameState.matchDuration) * 100;
@@ -333,13 +336,11 @@ const Game: React.FC = () => {
   const timeUntilSabotage = Math.max(0, halfwayPoint - elapsedTime);
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#09090b] text-foreground">
       {/* Match Result Overlay */}
       {isMatchCompleted && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center animate-in zoom-in-95 duration-500">
-          <div className={`relative overflow-hidden border p-1 rounded-3xl max-w-lg w-full text-center shadow-2xl ${isWinner ? 'bg-gradient-to-br from-gold/50 via-yellow-600/20 to-transparent border-gold/50 shadow-gold/20'
-            : 'bg-gradient-to-br from-red-600/50 via-red-900/20 to-transparent border-red-500/50 shadow-red-500/20'
-            }`}>
+          <div className={`relative overflow-hidden border p-1 rounded-3xl max-w-lg w-full text-center shadow-2xl ${isWinner ? 'bg-gradient-to-br from-gold/50 via-yellow-600/20 to-transparent border-gold/50 shadow-gold/20' : 'bg-gradient-to-br from-red-600/50 via-red-900/20 to-transparent border-red-500/50 shadow-red-500/20'}`}>
             <div className="bg-surface/90 backdrop-blur-xl p-8 rounded-[22px] space-y-6">
               <div className="relative">
                 <div className={`text-8xl mb-2 drop-shadow-2xl animate-bounce ${isWinner ? 'text-gold' : 'text-red-500'}`}>
@@ -372,12 +373,7 @@ const Game: React.FC = () => {
                 </div>
               </div>
               <div className="pt-2">
-                <Button
-                  onClick={() => navigate('/lobby')}
-                  className={`w-full h-14 text-lg font-bold tracking-widest uppercase transition-all hover:scale-[1.02] ${isWinner ? 'bg-gold hover:bg-gold/90 text-black shadow-[0_0_20px_rgba(251,191,36,0.4)]'
-                    : 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]'
-                    }`}
-                >
+                <Button onClick={() => navigate('/lobby')} className={`w-full h-14 text-lg font-bold tracking-widest uppercase transition-all hover:scale-[1.02] ${isWinner ? 'bg-gold hover:bg-gold/90 text-black shadow-[0_0_20px_rgba(251,191,36,0.4)]' : 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)]'}`}>
                   Return to Lobby
                 </Button>
               </div>
@@ -392,314 +388,301 @@ const Game: React.FC = () => {
       )}
 
       {/* ─── TOP BAR ─── */}
-      <header className="flex-shrink-0 px-3 pt-3">
-        <div className="glass-panel px-4 py-2.5 flex items-center justify-between gap-4">
-          {/* Left: Title + Match Info */}
+      <header className="flex-shrink-0 px-2 pt-2 z-10">
+        <div className="glass-panel px-4 py-2 flex items-center justify-between gap-4 border-b border-white/10 bg-[#161b22]/90 backdrop-blur-xl">
           <div className="flex items-center gap-4 min-w-0">
             <div className="min-w-0">
-              <h1 className="font-orbitron text-sm md:text-base font-bold truncate">CODEWAR</h1>
-              <p className="text-[10px] text-primary tracking-wide">
-                ⚔ {gameState.teamSize}v{gameState.teamSize} · {formatTimeVerbose(gameState.matchDuration)}
+              <h1 className="font-orbitron text-sm md:text-base font-bold truncate text-primary/90 tracking-widest uppercase">Codewar</h1>
+              <p className="text-[10px] text-muted-foreground tracking-widest uppercase">
+                {gameState.teamSize}v{gameState.teamSize} <span className="text-white/20 px-1">|</span> {formatTimeVerbose(gameState.matchDuration)}
               </p>
             </div>
             <div className="h-8 w-px bg-border hidden md:block" />
-            {/* Inline Timers */}
+
             {!isLoading && (
-              <div className="hidden md:flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-20 h-2 bg-black/50 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 rounded-full ${myTimePercent > 50 ? 'bg-primary' : myTimePercent > 25 ? 'bg-gold' : 'bg-accent'}`}
-                      style={{ width: `${myTimePercent}%` }}
-                    />
-                  </div>
-                  <span className={`text-xs font-mono font-bold min-w-[40px] ${gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : 'text-primary'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
+              <div className="hidden md:flex items-center gap-4">
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`text-[10px] font-mono font-bold ${gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : 'text-primary'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatTime(gameState.myTeamTime)}
                   </span>
+                  <div className="w-24 h-1.5 bg-black/50 rounded-full overflow-hidden">
+                    <div className={`h-full transition-all duration-300 rounded-full shadow-[0_0_10px_currentColor] ${myTimePercent > 50 ? 'bg-primary' : myTimePercent > 25 ? 'bg-gold' : 'bg-accent'}`} style={{ width: `${myTimePercent}%` }} />
+                  </div>
                 </div>
-                <span className="text-[10px] text-muted-foreground font-bold">VS</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-bold text-accent min-w-[40px]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                <div className="flex flex-col items-center justify-center">
+                  <span className="text-[9px] text-muted-foreground/50 font-black tracking-widest uppercase">VS</span>
+                </div>
+                <div className="flex flex-col items-start gap-1">
+                  <span className="text-[10px] font-mono font-bold text-accent" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {formatTime(gameState.enemyTeamTime)}
                   </span>
-                  <div className="w-20 h-2 bg-black/50 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-accent transition-all duration-300 rounded-full"
-                      style={{ width: `${enemyTimePercent}%` }}
-                    />
+                  <div className="w-24 h-1.5 bg-black/50 rounded-full overflow-hidden">
+                    <div className="h-full bg-accent shadow-[0_0_10px_currentColor] transition-all duration-300 rounded-full" style={{ width: `${enemyTimePercent}%` }} />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Right: Sabotage pills + Rank */}
-          <div className="flex items-center gap-2">
-            {/* Sabotage Quick-Access */}
-            <div className="hidden lg:flex items-center gap-1.5">
+          <div className="flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-1.5 bg-black/20 p-1 rounded-xl border border-white/5">
               {([['fog', '🌫', SABOTAGE_COSTS.fog], ['invert', '🔄', SABOTAGE_COSTS.invert], ['shake', '📳', SABOTAGE_COSTS.shake]] as const).map(([type, icon, cost]) => (
                 <button
                   key={type}
                   onClick={() => useSabotage(type as 'fog' | 'invert' | 'shake')}
                   disabled={!gameState.sabotagesUnlocked}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all
-                    ${gameState.sabotagesUnlocked
-                      ? 'border-white/15 bg-white/5 hover:bg-white/10 hover:border-primary/50 cursor-pointer'
-                      : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
+                  className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all flex items-center gap-1.5
+                    ${gameState.sabotagesUnlocked ? 'bg-white/5 hover:bg-white/10 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] text-white cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
                   title={`${type} (${formatTimeVerbose(cost as number)})`}
                 >
-                  {icon}
+                  <span>{icon}</span>
                 </button>
               ))}
+              <div className="w-px h-4 bg-white/10 mx-1" />
               <button
                 onClick={useMemeNuke}
                 disabled={memeCooldown || !gameState.sabotagesUnlocked}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all
-                  ${gameState.sabotagesUnlocked && !memeCooldown
-                    ? 'border-accent/40 bg-accent/10 hover:bg-accent/20 text-accent cursor-pointer'
-                    : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
+                className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all flex items-center gap-1.5
+                  ${gameState.sabotagesUnlocked && !memeCooldown ? 'bg-accent/10 hover:bg-accent/20 text-accent hover:shadow-[0_0_15px_rgba(239,68,68,0.2)] cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
                 title={`Meme Nuke (${formatTimeVerbose(SABOTAGE_COSTS.memeNuke)})`}
               >
                 💀
               </button>
             </div>
 
-            <div className="h-6 w-px bg-border hidden lg:block" />
-
-            <div className="text-[10px] text-muted-foreground hidden sm:block">
-              {gameState.sabotagesUnlocked
-                ? <span className="text-primary">🔓 Active</span>
-                : <span>🔒 {formatTimeVerbose(timeUntilSabotage)}</span>
-              }
+            <div className="text-[10px] font-mono tracking-widest text-muted-foreground hidden sm:block bg-black/30 px-2 py-1 rounded border border-white/5">
+              {gameState.sabotagesUnlocked ? <span className="text-primary font-bold">🔓 WEAPONS HOT</span> : <span>🔒 {formatTimeVerbose(timeUntilSabotage)}</span>}
             </div>
 
-            <div className="px-3 py-1 rounded-lg border border-gold/30 bg-gold/10 text-gold font-orbitron text-[11px] font-bold whitespace-nowrap">
-              {currentRank}
+            <div className="px-3 py-1.5 rounded-lg border border-gold/30 bg-gold/10 text-gold font-orbitron text-[11px] font-bold whitespace-nowrap uppercase tracking-wider flex items-center gap-1.5 shadow-[0_0_15px_rgba(251,191,36,0.15)]">
+              <span>{currentRank.emoji}</span> {currentRank.name}
             </div>
           </div>
         </div>
       </header>
 
       {/* ─── MAIN CONTENT ─── */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 min-h-0 overflow-hidden">
+      <div className="flex-1 p-2 min-h-0 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border border-white/10 overflow-hidden bg-[#0d1117] shadow-2xl">
 
-        {/* ─── LEFT PANEL: Problem + Teams ─── */}
-        <aside className="lg:col-span-4 xl:col-span-3 flex flex-col gap-3 min-h-0 overflow-y-auto">
-
-          {/* Problem Description */}
-          <div className="glass-panel p-4">
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <h2 className="font-bold text-base leading-tight">{question.title}</h2>
-              {question.difficulty && (
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap border ${question.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' :
-                  question.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' :
-                    question.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' :
-                      'text-red-400 border-red-400/30 bg-red-400/10'
-                  }`}>
-                  {question.difficulty}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">{question.description}</p>
-
-            {/* Sample Test Cases */}
-            {(() => {
-              let testCases: any[] = [];
-              try {
-                const raw = question.test_cases;
-                if (Array.isArray(raw)) testCases = raw;
-                else if (typeof raw === 'string') testCases = JSON.parse(raw);
-              } catch { /* invalid */ }
-
-              const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
-              if (visible.length === 0) return null;
-
-              return (
-                <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Examples</p>
-                  {visible.map((tc: any, i: number) => (
-                    <div key={i} className="grid grid-cols-2 gap-1.5">
-                      <div>
-                        <span className="text-[9px] text-muted-foreground/60 uppercase">Input</span>
-                        <pre className="bg-black/40 rounded-lg px-2.5 py-1.5 text-[11px] text-green-300 font-mono whitespace-pre-wrap mt-0.5 border border-white/5">{String(tc.input ?? '(none)')}</pre>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-muted-foreground/60 uppercase">Output</span>
-                        <pre className="bg-black/40 rounded-lg px-2.5 py-1.5 text-[11px] text-yellow-300 font-mono whitespace-pre-wrap mt-0.5 border border-white/5">{String(tc.output ?? '')}</pre>
-                      </div>
-                    </div>
-                  ))}
-                  {testCases.some((tc: any) => tc && tc.visible === false) && (
-                    <p className="text-[9px] text-muted-foreground/50 italic">+ hidden tests on submit</p>
+          {/* ─── LEFT PANEL ─── */}
+          <ResizablePanel defaultSize={35} minSize={25} className="flex flex-col">
+            <ResizablePanelGroup direction="vertical">
+              <ResizablePanel defaultSize={60} minSize={30} className="p-5 overflow-y-auto bg-surface/30 custom-scrollbar">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <h2 className="font-bold text-lg leading-tight text-white/90">{question.title}</h2>
+                  {question.difficulty && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap uppercase tracking-widest border shadow-sm ${question.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' : question.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' : question.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' : 'text-red-400 border-red-400/30 bg-red-400/10'}`}>
+                      {question.difficulty}
+                    </span>
                   )}
                 </div>
-              );
-            })()}
-          </div>
-
-          {/* Mobile Timers (visible on small screens) */}
-          <div className="lg:hidden glass-panel p-3">
-            {isLoading ? (
-              <div className="flex justify-center items-center h-12 text-muted-foreground gap-2 text-sm">
-                <Loader2 className="animate-spin w-4 h-4" /> Syncing...
-              </div>
-            ) : (
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="font-bold text-primary">YOU</span>
-                    <span className={`font-mono ${gameState.myTeamTime < 60 ? 'text-accent animate-pulse' : ''}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(gameState.myTeamTime)}</span>
-                  </div>
-                  <div className="h-2 bg-black/50 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all ${myTimePercent > 50 ? 'bg-primary' : myTimePercent > 25 ? 'bg-gold' : 'bg-accent'}`} style={{ width: `${myTimePercent}%` }} />
-                  </div>
+                <div className="text-[13px] text-muted-foreground/80 leading-relaxed space-y-4">
+                  <p>{question.description}</p>
                 </div>
-                <span className="text-[10px] text-muted-foreground font-bold">VS</span>
-                <div className="flex-1">
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="font-bold text-accent">ENEMY</span>
-                    <span className="font-mono" style={{ fontVariantNumeric: 'tabular-nums' }}>{formatTime(gameState.enemyTeamTime)}</span>
-                  </div>
-                  <div className="h-2 bg-black/50 rounded-full overflow-hidden">
-                    <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${enemyTimePercent}%` }} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Teams */}
-          <div className="glass-panel p-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-1.5">Your Team</h4>
-                <div className="space-y-1">
-                  {gameState.myTeam.map((member, i) => (
-                    <div key={member.user_id} className="flex items-center gap-1.5 text-xs">
-                      <span className="text-[10px]">{i === 0 ? '🔥' : '⚙'}</span>
-                      <span className={member.user_id === profile?.user_id ? 'text-primary font-semibold' : 'text-muted-foreground'}>
-                        {member.username}{member.user_id === profile?.user_id && ' (You)'}
+                {(() => {
+                  let testCases: any[] = [];
+                  try {
+                    const raw = question.test_cases;
+                    if (Array.isArray(raw)) testCases = raw;
+                    else if (typeof raw === 'string') testCases = JSON.parse(raw);
+                  } catch { }
+
+                  const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
+                  if (visible.length === 0) return null;
+
+                  return (
+                    <div className="mt-6 pt-4 border-t border-white/5 space-y-3">
+                      <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest flex items-center gap-2">
+                        <Terminal size={12} /> Test Cases
+                      </p>
+                      {visible.map((tc: any, i: number) => (
+                        <div key={i} className="bg-black/40 rounded-lg p-3 border border-white/5 space-y-2">
+                          <div>
+                            <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Input</span>
+                            <pre className="text-[12px] text-green-300 font-mono whitespace-pre-wrap">{String(tc.input ?? '(none)')}</pre>
+                          </div>
+                          <div className="w-full h-px bg-white/5" />
+                          <div>
+                            <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Output</span>
+                            <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap">{String(tc.output ?? '')}</pre>
+                          </div>
+                        </div>
+                      ))}
+                      {testCases.some((tc: any) => tc && tc.visible === false) && (
+                        <p className="text-[9px] text-accent/50 font-mono italic text-center mt-2">✨ Hidden test cases will run on submit</p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </ResizablePanel>
+
+              <ResizableHandle className="bg-white/5 h-[2px] transition-colors hover:bg-primary/30" />
+
+              <ResizablePanel defaultSize={40} minSize={20} className="bg-surface/20 flex flex-col pt-2">
+                <Tabs defaultValue="battle" className="flex-1 flex flex-col min-h-0">
+                  <TabsList className="bg-transparent border-b border-white/5 w-full justify-start rounded-none px-4 h-9 gap-4">
+                    <TabsTrigger value="battle" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-1 py-2 text-[10px] uppercase tracking-widest font-bold">Battle Log</TabsTrigger>
+                    <TabsTrigger value="teams" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-1 py-2 text-[10px] uppercase tracking-widest font-bold">Teams</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="battle" className="flex-1 min-h-0 mt-0 flex flex-col p-3 m-0 data-[state=inactive]:hidden">
+                    <div className="flex-1 overflow-y-auto space-y-1 bg-[#09090b]/50 rounded-lg p-2 border border-white/5 shadow-inner custom-scrollbar flex flex-col-reverse">
+                      {logs.map((log, i) => (
+                        <div key={i} className={`text-[11px] leading-relaxed p-2 rounded-md border font-mono animate-in slide-in-from-left-2 fade-in duration-300 ${i === 0 ? 'text-primary font-bold border-primary/20 bg-primary/10 shadow-[0_0_10px_rgba(16,185,129,0.05)]' : 'text-muted-foreground/70 border-white/[0.02] bg-white/[0.02]'}`}>
+                          {log}
+                        </div>
+                      ))}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="teams" className="flex-1 min-h-0 mt-0 overflow-y-auto p-4 m-0 data-[state=inactive]:hidden custom-scrollbar">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-3">
+                        <h4 className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-widest mb-1.5 pb-2 border-b border-primary/20">
+                          <span className="w-2 h-2 rounded-full bg-primary animate-pulse" /> Your Team
+                        </h4>
+                        <div className="space-y-2">
+                          {gameState.myTeam.map((member, i) => (
+                            <div key={member.user_id} className="flex items-center gap-2 text-xs bg-white/5 p-2 rounded-lg border border-white/5">
+                              <span className="text-[12px] opacity-70">{i === 0 ? '👑' : '⚔'}</span>
+                              <span className={`font-mono truncate ${member.user_id === profile?.user_id ? 'text-primary font-bold' : 'text-zinc-300'}`}>
+                                {member.username}{member.user_id === profile?.user_id && ' (You)'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <h4 className="flex items-center gap-2 text-[10px] font-bold text-accent uppercase tracking-widest mb-1.5 pb-2 border-b border-accent/20">
+                          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" /> Enemy Team
+                        </h4>
+                        <div className="space-y-2">
+                          {gameState.enemyTeam.map((member) => (
+                            <div key={member.user_id} className="flex items-center gap-2 text-xs bg-red-950/20 p-2 rounded-lg border border-accent/10">
+                              <span className="text-[12px] opacity-70">💀</span>
+                              <span className="font-mono text-zinc-400 truncate">{member.username}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          <ResizableHandle className="w-[2px] bg-background border-x border-white/5 transition-colors hover:bg-primary/30 z-20" />
+
+          {/* ─── RIGHT PANEL: Editor Zone ─── */}
+          <ResizablePanel defaultSize={65} minSize={40} className={`flex flex-col bg-[#0d1117] relative ${sabotageEffects.shake ? 'animate-shake' : ''}`}>
+
+            <ResizablePanelGroup direction="vertical">
+              <ResizablePanel defaultSize={75} minSize={30} className="flex flex-col relative z-0">
+                <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-white/5">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+                    <span className="w-2 h-2 bg-yellow-500 rounded-full" />
+                    Solution.py
+                  </div>
+                  <div className="text-[9px] text-white/20 font-mono tracking-widest uppercase">Monaco Editor</div>
+                </div>
+                <div className={`flex-1 pt-2 ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''}`}>
+                  <Editor
+                    height="100%"
+                    defaultLanguage="python"
+                    theme="vs-dark"
+                    value={code}
+                    onChange={(value) => setCode(value || '')}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 14,
+                      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                      fontLigatures: true,
+                      padding: { top: 16, bottom: 16 },
+                      scrollBeyondLastLine: false,
+                      smoothScrolling: true,
+                      cursorBlinking: "smooth",
+                      cursorSmoothCaretAnimation: "on",
+                      formatOnPaste: true,
+                      renderLineHighlight: "all",
+                      parameterHints: { enabled: true },
+                      suggestOnTriggerCharacters: true
+                    }}
+                  />
+                </div>
+              </ResizablePanel>
+
+              <ResizableHandle className="bg-white/5 h-[2px] transition-colors hover:bg-primary/30 z-20" />
+
+              <ResizablePanel defaultSize={25} minSize={15} className="flex flex-col z-0">
+                <Tabs defaultValue="console" className="flex-1 flex flex-col min-h-0 bg-[#0d1117]">
+                  <div className="flex items-center justify-between px-4 py-0 bg-[#161b22] border-b border-white/5">
+                    <TabsList className="bg-transparent h-9 p-0 gap-6">
+                      <TabsTrigger value="console" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary px-1 text-[10px] uppercase tracking-widest font-bold">
+                        <Terminal size={12} className="mr-1.5 opacity-70" /> Console
+                      </TabsTrigger>
+                      <TabsTrigger value="input" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary px-1 text-[10px] uppercase tracking-widest font-bold">
+                        Custom Input
+                      </TabsTrigger>
+                    </TabsList>
+                    {isExecuting && (
+                      <span className="flex items-center gap-1.5 text-[10px] text-accent font-bold uppercase tracking-widest animate-pulse">
+                        <Loader2 className="animate-spin w-3 h-3" /> Executing
                       </span>
-                    </div>
-                  ))}
-                </div>
+                    )}
+                  </div>
+
+                  <TabsContent value="console" className="flex-1 min-h-0 p-3 m-0 overflow-y-auto font-mono text-[12px] custom-scrollbar data-[state=inactive]:hidden">
+                    {consoleOutput.length === 0 ? (
+                      <div className="text-white/10 italic h-full flex items-center justify-center font-bold tracking-widest uppercase">Awaiting execution...</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {consoleOutput.map((log, i) => (
+                          <div key={i} className={`flex gap-2 ${log.type === 'error' ? 'text-red-400 bg-red-500/5 p-1.5 rounded' : log.type === 'warn' ? 'text-yellow-400 bg-yellow-500/5 p-1.5 rounded' : 'text-zinc-300'}`}>
+                            <span className="opacity-30 select-none">›</span>
+                            <pre className="whitespace-pre-wrap font-inherit leading-relaxed">{log.content}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="input" className="flex-1 min-h-0 p-0 m-0 flex flex-col data-[state=inactive]:hidden">
+                    <textarea
+                      value={customInput}
+                      onChange={(e) => setCustomInput(e.target.value)}
+                      className="flex-1 w-full bg-transparent text-[13px] text-zinc-300 resize-none focus:outline-none p-4 font-mono placeholder:text-muted-foreground/30 custom-scrollbar"
+                      placeholder="Enter standard input here..."
+                    />
+                  </TabsContent>
+                </Tabs>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+
+            <div className="flex-shrink-0 p-4 bg-[#161b22] border-t border-white/5 flex gap-3 items-center z-10">
+              <div className="text-[10px] text-muted-foreground/40 tracking-widest font-mono hidden sm:block font-bold">
+                {isExecuting ? 'JUDGE ACTIVE...' : 'READY TO COMPILE'}
               </div>
-              <div>
-                <h4 className="text-[10px] font-semibold text-accent/70 uppercase tracking-widest mb-1.5">Enemy Team</h4>
-                <div className="space-y-1">
-                  {gameState.enemyTeam.map((member) => (
-                    <div key={member.user_id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="text-[10px]">💀</span>
-                      <span>{member.username}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Kill Feed */}
-          <div className="glass-panel p-3 flex-1 min-h-0 flex flex-col">
-            <h4 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Battle Log</h4>
-            <div className="flex-1 overflow-y-auto space-y-0.5 bg-black/20 rounded-lg p-2 min-h-[80px]">
-              {logs.map((log, i) => (
-                <div key={i} className={`text-[11px] leading-relaxed ${i === 0 ? 'text-foreground/80' : 'text-muted-foreground/60'}`}>
-                  {log}
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-
-        {/* ─── RIGHT PANEL: Editor Zone ─── */}
-        <main className={`lg:col-span-8 xl:col-span-9 flex flex-col gap-3 min-h-0 ${sabotageEffects.shake ? 'animate-shake' : ''}`}>
-
-          {/* Code Editor */}
-          <div className="flex-1 min-h-0 flex flex-col">
-            <textarea
-              ref={editorRef}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className={`flex-1 w-full bg-[#0d1117] border border-white/10 rounded-xl p-4 font-mono text-sm text-green-400 resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 transition-shadow ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''}`}
-              spellCheck={false}
-              placeholder="# Write your Python script here..."
-              style={{ minHeight: '200px' }}
-            />
-          </div>
-
-          {/* Bottom Zone: Input + Console side by side */}
-          <div className="flex-shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3" style={{ height: '160px' }}>
-            {/* Custom Input */}
-            <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3 flex flex-col min-h-0">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5 text-[10px] uppercase tracking-wider font-semibold">
-                <span>Custom Input</span>
-                <span className="text-muted-foreground/40">· RUN only</span>
-              </div>
-              <textarea
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                className="flex-1 w-full bg-transparent text-xs text-muted-foreground resize-none focus:outline-none font-mono"
-                placeholder="stdin data..."
-              />
+              <div className="flex-1" />
+              <Button variant="outline" onClick={handleExitMatch} className="h-10 px-5 gap-2 border-white/5 bg-transparent text-muted-foreground hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition-all text-[11px] font-bold tracking-widest uppercase">
+                <XCircle size={14} />
+                {isMatchCompleted ? 'Leave' : 'Surrender'}
+              </Button>
+              <Button onClick={runCode} disabled={isExecuting} className="h-10 px-6 bg-emerald-600/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold tracking-widest uppercase gap-2 transition-all hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] text-[11px]">
+                <Play size={14} fill="currentColor" />
+                {isExecuting ? 'Running' : 'Run'}
+              </Button>
+              <Button onClick={submitCode} disabled={isExecuting} className="h-10 px-8 bg-gradient-to-r from-gold to-amber-500 text-black font-extrabold tracking-widest uppercase gap-2 transition-all shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:scale-[1.02] text-[11px]">
+                <CheckCircle2 size={14} />
+                {isExecuting ? 'Judging' : 'Submit'}
+              </Button>
             </div>
 
-            {/* Console Output */}
-            <div className="bg-[#0d1117] border border-white/10 rounded-xl p-3 flex flex-col min-h-0 overflow-hidden">
-              <div className="flex items-center justify-between text-[10px] uppercase tracking-wider font-semibold mb-1.5">
-                <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <Terminal size={12} />
-                  <span>Console</span>
-                </div>
-                {isExecuting && (
-                  <span className="flex items-center gap-1 text-accent">
-                    <Loader2 className="animate-spin w-3 h-3" /> Running...
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 overflow-y-auto space-y-0.5 font-mono text-[11px]">
-                {consoleOutput.length === 0 ? (
-                  <div className="text-white/15 italic">Ready...</div>
-                ) : (
-                  consoleOutput.map((log, i) => (
-                    <div key={i} className={`flex gap-1.5 ${log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-yellow-400' : 'text-green-300'}`}>
-                      <span className="opacity-30 select-none">›</span>
-                      <pre className="whitespace-pre-wrap font-inherit">{log.content}</pre>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+          </ResizablePanel>
 
-          {/* Action Buttons */}
-          <div className="flex-shrink-0 flex gap-2">
-            <Button
-              onClick={runCode}
-              disabled={isExecuting}
-              className="h-11 px-6 bg-emerald-600 hover:bg-emerald-500 text-white font-bold tracking-wide gap-2 transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.4)]"
-            >
-              <Play size={14} fill="currentColor" />
-              {isExecuting ? 'RUNNING...' : 'RUN'}
-            </Button>
-            <Button
-              onClick={submitCode}
-              disabled={isExecuting}
-              className="h-11 px-8 bg-gradient-to-r from-gold to-amber-500 text-black font-bold tracking-wide gap-2 transition-all shadow-[0_0_15px_rgba(251,191,36,0.3)] hover:shadow-[0_0_30px_rgba(251,191,36,0.5)] hover:scale-[1.01]"
-            >
-              <CheckCircle2 size={14} />
-              {isExecuting ? 'JUDGING...' : 'SUBMIT'}
-            </Button>
-            <div className="flex-1" />
-            <Button
-              variant="outline"
-              onClick={handleExitMatch}
-              className="h-11 px-5 gap-2 border-accent/30 text-accent/80 hover:bg-accent/10 hover:text-accent hover:border-accent/50 transition-all"
-            >
-              <XCircle size={14} />
-              {isMatchCompleted ? 'Leave' : 'Surrender'}
-            </Button>
-          </div>
-        </main>
+        </ResizablePanelGroup>
       </div>
     </div>
   );
