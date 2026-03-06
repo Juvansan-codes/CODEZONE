@@ -15,14 +15,14 @@ export interface RankTier {
 }
 
 export const RANK_TIERS: RankTier[] = [
-  { name: 'Bronze', xp: 0, color: '#cd7f32', emoji: '🥉' },
-  { name: 'Silver', xp: 100, color: '#c0c0c0', emoji: '🥈' },
-  { name: 'Gold', xp: 300, color: '#ffd700', emoji: '🥇' },
-  { name: 'Platinum', xp: 600, color: '#00cec9', emoji: '💎' },
-  { name: 'Diamond', xp: 1000, color: '#a29bfe', emoji: '💠' },
-  { name: 'Master', xp: 1500, color: '#fd79a8', emoji: '🏅' },
-  { name: 'Grandmaster', xp: 2500, color: '#e84393', emoji: '👑' },
-  { name: 'Legend', xp: 5000, color: '#ff6b6b', emoji: '🔥' },
+  { name: 'Iron', xp: 0, color: '#8b8b8b', emoji: '⚙️' },
+  { name: 'Bronze', xp: 1000, color: '#cd7f32', emoji: '🥉' },
+  { name: 'Silver', xp: 2500, color: '#c0c0c0', emoji: '🥈' },
+  { name: 'Gold', xp: 5000, color: '#ffd700', emoji: '🥇' },
+  { name: 'Platinum', xp: 7500, color: '#00cec9', emoji: '💎' },
+  { name: 'Diamond', xp: 10000, color: '#a29bfe', emoji: '💠' },
+  { name: 'Master', xp: 15000, color: '#fd79a8', emoji: '🏅' },
+  { name: 'Grandmaster', xp: 20000, color: '#e84393', emoji: '👑' },
 ];
 
 export interface RankInfo {
@@ -60,8 +60,8 @@ export function getRankFromXP(xp: number): RankInfo {
     ? Math.min(100, Math.round((xpInCurrentTier / xpNeededForNextTier) * 100))
     : 100; // Max rank = 100% complete
 
-  // Level = 1 + floor(xp / 50), so every 50 XP = 1 level
-  const level = Math.floor(safeXp / 50) + 1;
+  // Level = 1 + floor(xp / 200), so every 200 XP = 1 level
+  const level = Math.floor(safeXp / 200) + 1;
 
   return {
     rank,
@@ -72,6 +72,21 @@ export function getRankFromXP(xp: number): RankInfo {
     progressPercent,
     level,
   };
+}
+
+/**
+ * Returns the tier name and its adjacent (±1) tier names.
+ * Used by matchmaking to find opponents in a similar skill bracket.
+ */
+export function getAdjacentTiers(tierName: string): string[] {
+  const index = RANK_TIERS.findIndex(t => t.name === tierName);
+  if (index === -1) return [tierName]; // Fallback
+
+  const tiers: string[] = [];
+  if (index > 0) tiers.push(RANK_TIERS[index - 1].name);
+  tiers.push(RANK_TIERS[index].name);
+  if (index < RANK_TIERS.length - 1) tiers.push(RANK_TIERS[index + 1].name);
+  return tiers;
 }
 
 /** @deprecated Use getRankFromXP instead. Kept for backward compatibility. */

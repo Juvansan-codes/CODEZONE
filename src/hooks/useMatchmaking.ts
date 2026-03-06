@@ -2,17 +2,24 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { getRankFromXP, getAdjacentTiers } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type GameMode = 'duel' | 'campaign' | 'practice';
 type MatchStatus = 'idle' | 'searching' | 'found' | 'error';
 
+const QUEUE_TIMEOUT_MS = 30_000; // 30 seconds
+
 export const useMatchmaking = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [status, setStatus] = useState<MatchStatus>('idle');
   const [matchId, setMatchId] = useState<string | null>(null);
   const [queueId, setQueueId] = useState<string | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Compute current rank tier from profile XP
+  const currentTier = getRankFromXP(profile?.xp ?? 0).rank.name;
 
   // Helper to handle match found (prevents duplicate navigation)
   const handleMatchFound = useCallback((foundMatchId: string) => {
@@ -22,6 +29,24 @@ export const useMatchmaking = () => {
       return foundMatchId;
     });
     setStatus('found');
+
+    // Clear timeout since we found a match
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
+  // Cleanup function for queue timeout + polling + realtime
+  const cleanupAll = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   }, []);
 
   // Subscribe to queue updates (Realtime) + Polling Fallback
@@ -45,11 +70,36 @@ export const useMatchmaking = () => {
           }
         }
       )
+      // Also listen for new INSERT events — a new player joining could match us
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'matchmaking_queue',
+        },
+        async (payload) => {
+          // If we are still waiting and the new entry is a potential opponent
+          if (
+            payload.new.status === 'waiting' &&
+            payload.new.user_id !== user?.id
+          ) {
+            // Re-check our queue status — the new opponent may have already matched us
+            const { data: queueData } = await supabase
+              .from('matchmaking_queue')
+              .select('status, match_id')
+              .eq('id', queueId)
+              .single();
+
+            if (queueData?.status === 'matched' && queueData?.match_id) {
+              handleMatchFound(queueData.match_id);
+            }
+          }
+        }
+      )
       .subscribe();
 
     // --- Polling fallback (every 3s) ---
-    // Polls 1) The queue for status updates
-    // Polls 2) The MATCHES table directly (in case RLS blocked the queue update)
     pollRef.current = setInterval(async () => {
       // Check Queue (Fast check)
       const { data: queueData } = await supabase
@@ -68,7 +118,7 @@ export const useMatchmaking = () => {
       const { data: matchData } = await supabase
         .from('matches')
         .select('id')
-        .or(`team_a.cs.{${user.id}},team_b.cs.{${user.id}}`)
+        .or(`team_a.cs.{${user!.id}},team_b.cs.{${user!.id}}`)
         .eq('status', 'in_progress')
         .gt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString()) // Created in last 2 mins
         .limit(1)
@@ -112,7 +162,11 @@ export const useMatchmaking = () => {
         .eq('status', 'waiting')
         .lt('created_at', twoMinutesAgo);
 
-      // 2. Search for a FRESH waiting opponent (fetch batch to filter for online)
+      // 2. Compute rank tier and adjacent tiers for filtering
+      const myTier = getRankFromXP(profile?.xp ?? 0).rank.name;
+      const allowedTiers = getAdjacentTiers(myTier);
+
+      // 3. Search for a FRESH waiting opponent in same or adjacent rank tier
       const { data: potentialOpponents, error: searchError } = await supabase
         .from('matchmaking_queue')
         .select('*')
@@ -120,6 +174,7 @@ export const useMatchmaking = () => {
         .eq('team_size', teamSize)
         .eq('status', 'waiting')
         .neq('user_id', user.id) // Don't match with self
+        .in('rank_tier', allowedTiers) // Same or adjacent rank tier
         .gte('created_at', twoMinutesAgo) // Only fresh entries
         .limit(10); // Fetch more than 1 to allow for filtering
 
@@ -172,7 +227,7 @@ export const useMatchmaking = () => {
           .eq('id', opponent.id);
 
         if (updateError) {
-          // console.warn('Failed to update opponent queue status (RLS?) - this is expected, polling fallback will handle it.');
+          // console.warn('Failed to update opponent queue status (RLS?) - polling fallback will handle it.');
         }
 
         // C. Set my status -> found
@@ -189,6 +244,7 @@ export const useMatchmaking = () => {
             game_mode: mode,
             team_size: teamSize,
             status: 'waiting',
+            rank_tier: myTier,
           })
           .select()
           .single();
@@ -197,6 +253,19 @@ export const useMatchmaking = () => {
 
         setQueueId(entry.id);
         toast.info('Searching for players...');
+
+        // --- 30-SECOND TIMEOUT ---
+        timeoutRef.current = setTimeout(async () => {
+          // Auto-remove from queue and notify the user
+          await supabase
+            .from('matchmaking_queue')
+            .delete()
+            .eq('user_id', user.id);
+
+          setStatus('idle');
+          setQueueId(null);
+          toast.error('No opponent found, try again.');
+        }, QUEUE_TIMEOUT_MS);
       }
 
     } catch (err: any) {
@@ -204,7 +273,7 @@ export const useMatchmaking = () => {
       toast.error('Failed to join matchmaking: ' + err.message);
       setStatus('error');
     }
-  }, [user]);
+  }, [user, profile]);
 
   const leaveQueue = useCallback(async () => {
     if (!user) return;
@@ -217,11 +286,17 @@ export const useMatchmaking = () => {
 
       setStatus('idle');
       setQueueId(null);
+      cleanupAll();
       toast.info('Left matchmaking queue');
     } catch (err) {
       console.error('Error leaving queue:', err);
     }
-  }, [user]);
+  }, [user, cleanupAll]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => cleanupAll();
+  }, [cleanupAll]);
 
   return {
     joinQueue,
