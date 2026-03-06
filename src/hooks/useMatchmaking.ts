@@ -106,7 +106,7 @@ export const useMatchmaking = () => {
         .from('matchmaking_queue')
         .select('status, match_id')
         .eq('id', queueId)
-        .single();
+        .maybeSingle();
 
       if (queueData?.status === 'matched' && queueData?.match_id) {
         handleMatchFound(queueData.match_id);
@@ -118,11 +118,11 @@ export const useMatchmaking = () => {
       const { data: matchData } = await supabase
         .from('matches')
         .select('id')
-        .or(`team_a.cs.{${user!.id}},team_b.cs.{${user!.id}}`)
+        .or(`team_a.cs.{"${user!.id}"},team_b.cs.{"${user!.id}"}`)
         .eq('status', 'in_progress')
         .gt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString()) // Created in last 2 mins
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (matchData) {
         handleMatchFound(matchData.id);
