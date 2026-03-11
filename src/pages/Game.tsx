@@ -66,6 +66,8 @@ const Game: React.FC = () => {
     deductEnemyTime,
     initializeDemo,
     surrenderMatch,
+    finishMatch,
+    sendSabotage,
     isLoading
   } = useGameSession(matchId);
 
@@ -77,12 +79,12 @@ const Game: React.FC = () => {
   );
 
   const [wins, setWins] = useState(0);
-  const [question, setQuestion] = useState<any>({ title: 'Loading...', description: 'Fetching question...' });
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const currentQuestion = questions[currentQuestionIndex] || { title: 'Loading...', description: 'Fetching question...' };
+  const totalQuestions = questions.length;
   const [code, setCode] = useState('// Loading environment...');
   const [logs, setLogs] = useState<string[]>(['Arena ready — fight begins!']);
-  const [sabotageEffects, setSabotageEffects] = useState<{ fog: boolean; invert: boolean; shake: boolean }>({
-    fog: false, invert: false, shake: false
-  });
   const [memeCooldown, setMemeCooldown] = useState(false);
   const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
   const [customInput, setCustomInput] = useState('');
@@ -134,21 +136,45 @@ const Game: React.FC = () => {
         .select('*');
 
       if (!error && data && data.length > 0) {
-        // For now, just pick the first one or random
-        setQuestion(data[0]);
-        setCode(data[0].template_code || '# Write your solution here');
+        // Shuffle questions for randomness
+        const shuffled = [...data].sort(() => Math.random() - 0.5);
+        setQuestions(shuffled);
+        setCode(shuffled[0].template_code || '# Write your solution here');
       } else {
         // Fallback if no questions in DB
-        setQuestion({
+        setQuestions([{
           title: 'No Questions Found',
           description: 'Please add questions in Admin Dashboard.',
           id: '0',
           difficulty: 'Easy'
-        } as any);
+        }]);
       }
     };
     fetchQuestions();
   }, []);
+
+  // Show toast when opponents disconnect
+  const prevDisconnectedRef = useRef<string[]>([]);
+  useEffect(() => {
+    const newDisconnects = gameState.disconnectedPlayers.filter(
+      id => !prevDisconnectedRef.current.includes(id)
+    );
+    if (newDisconnects.length > 0 && gameState.matchStatus !== 'completed') {
+      const isAllOpponents = gameState.enemyTeam.length > 0 &&
+        gameState.enemyTeam.every(m => gameState.disconnectedPlayers.includes(m.user_id));
+
+      if (isAllOpponents) {
+        toast.success('🏆 All opponents disconnected! You win!');
+      } else {
+        newDisconnects.forEach(id => {
+          const player = [...gameState.enemyTeam, ...gameState.myTeam].find(m => m.user_id === id);
+          const name = player?.username || 'A player';
+          toast.warning(`⚡ ${name} disconnected from the match`);
+        });
+      }
+    }
+    prevDisconnectedRef.current = gameState.disconnectedPlayers;
+  }, [gameState.disconnectedPlayers, gameState.matchStatus, gameState.enemyTeam, gameState.myTeam]);
 
   const validateCode = () => {
     if (!code || code.trim() === '') {
@@ -212,7 +238,7 @@ const Game: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
-          testCases: question.test_cases || []
+          testCases: currentQuestion.test_cases || []
         })
       });
 
@@ -237,8 +263,35 @@ const Game: React.FC = () => {
 
         if (data.all_passed) {
           deductEnemyTime(30);
-          toast.success('🔥 CODE PERFECT! CRITICAL HIT! -30s');
-          addLog('Code submitted and passed all tests! Enemy obliterated!');
+          addLog(`Question ${currentQuestionIndex + 1} SOLVED! Enemy takes -30s`);
+
+          if (currentQuestionIndex < totalQuestions - 1) {
+            // Advance to next question
+            const nextIdx = currentQuestionIndex + 1;
+            setCurrentQuestionIndex(nextIdx);
+            setCode(questions[nextIdx].template_code || '# Write your solution here');
+            toast.success(
+              <div className="text-center">
+                <div className="text-3xl mb-1">🎯</div>
+                <div className="font-bold">QUESTION {currentQuestionIndex + 1} SOLVED!</div>
+                <div className="text-sm mt-1 text-muted-foreground">Loading Q{nextIdx + 1}/{totalQuestions}...</div>
+              </div>,
+              { duration: 3000 }
+            );
+          } else {
+            // ALL questions complete → win the match!
+            toast.success(
+              <div className="text-center">
+                <div className="text-4xl mb-2">🏆</div>
+                <div className="font-bold text-lg">ALL QUESTIONS SOLVED!</div>
+                <div className="text-sm mt-1">Total Domination!</div>
+              </div>,
+              { duration: 5000 }
+            );
+            if (gameState._raw) {
+              finishMatch(gameState._raw.isTeamA ? 'team_a' : 'team_b');
+            }
+          }
         } else {
           toast.error('❌ Some tests failed.');
         }
@@ -269,10 +322,8 @@ const Game: React.FC = () => {
     deductMyTime(cost);
     addLog(`Used ${type.toUpperCase()} sabotage — cost ${formatTimeVerbose(cost)}`);
 
-    setSabotageEffects((prev) => ({ ...prev, [type]: true }));
-    setTimeout(() => {
-      setSabotageEffects((prev) => ({ ...prev, [type]: false }));
-    }, type === 'shake' ? 500 : 4000);
+    // Send sabotage to opponent via broadcast
+    sendSabotage(type);
 
     toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
   };
@@ -298,6 +349,9 @@ const Game: React.FC = () => {
     deductMyTime(cost);
     setMemeCooldown(true);
     addLog(`MEME NUKE DEPLOYED — cost ${formatTimeVerbose(cost)}`);
+
+    // Send memeNuke to opponent via broadcast
+    sendSabotage('memeNuke');
 
     toast.info(
       <div className="text-center">
@@ -360,6 +414,12 @@ const Game: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-4 py-4">
                 <div className="bg-black/30 rounded-xl p-4 border border-white/5">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-widest">Questions Solved</p>
+                  <p className={`text-2xl font-bold font-mono ${isWinner ? 'text-primary' : 'text-white'}`}>
+                    {currentQuestionIndex + (isWinner && currentQuestionIndex >= totalQuestions - 1 ? 1 : 0)}/{totalQuestions} <span className="text-base">🎯</span>
+                  </p>
+                </div>
+                <div className="bg-black/30 rounded-xl p-4 border border-white/5">
                   <p className="text-xs text-muted-foreground mb-1 uppercase tracking-widest">Coins</p>
                   <p className={`text-2xl font-bold font-mono ${isWinner ? 'text-gold' : 'text-white'}`}>
                     {isWinner ? '+100' : '+10'} <span className="text-base">🪙</span>
@@ -382,9 +442,18 @@ const Game: React.FC = () => {
         </div>
       )}
 
-      {/* Fog overlay */}
-      {sabotageEffects.fog && (
-        <div className="fixed inset-0 pointer-events-none z-50 bg-gradient-radial from-transparent via-black/70 to-black/95" />
+      {/* Sabotage Overlays — inflicted BY opponent */}
+      {gameState.incomingSabotage === 'fog' && (
+        <div className="fixed inset-0 pointer-events-none z-50 bg-black animate-sabotage-fog" />
+      )}
+      {gameState.incomingSabotage === 'memeNuke' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 pointer-events-none animate-sabotage-fog">
+          <div className="text-center animate-bounce">
+            <div className="text-[120px]">💀</div>
+            <div className="font-orbitron text-4xl text-red-500 font-black tracking-widest animate-pulse">MEME NUKED!</div>
+            <div className="text-lg text-red-400/70 mt-2">Your screen has been obliterated</div>
+          </div>
+        </div>
       )}
 
       {/* ─── TOP BAR ─── */}
@@ -395,6 +464,12 @@ const Game: React.FC = () => {
               <h1 className="font-orbitron text-sm md:text-base font-bold truncate text-primary/90 tracking-widest uppercase">Codewar</h1>
               <p className="text-[10px] text-muted-foreground tracking-widest uppercase">
                 {gameState.teamSize}v{gameState.teamSize} <span className="text-white/20 px-1">|</span> {formatTimeVerbose(gameState.matchDuration)}
+                {totalQuestions > 0 && (
+                  <>
+                    <span className="text-white/20 px-1">|</span>
+                    <span className="text-primary font-bold">Q {currentQuestionIndex + 1}/{totalQuestions}</span>
+                  </>
+                )}
               </p>
             </div>
             <div className="h-8 w-px bg-border hidden md:block" />
@@ -470,21 +545,21 @@ const Game: React.FC = () => {
             <ResizablePanelGroup direction="vertical">
               <ResizablePanel defaultSize={60} minSize={30} className="p-5 overflow-y-auto bg-surface/30 custom-scrollbar">
                 <div className="flex items-start justify-between gap-2 mb-3">
-                  <h2 className="font-bold text-lg leading-tight text-white/90">{question.title}</h2>
-                  {question.difficulty && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap uppercase tracking-widest border shadow-sm ${question.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' : question.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' : question.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' : 'text-red-400 border-red-400/30 bg-red-400/10'}`}>
-                      {question.difficulty}
+                  <h2 className="font-bold text-lg leading-tight text-white/90">{currentQuestion.title}</h2>
+                  {currentQuestion.difficulty && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap uppercase tracking-widest border shadow-sm ${currentQuestion.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' : currentQuestion.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' : currentQuestion.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' : 'text-red-400 border-red-400/30 bg-red-400/10'}`}>
+                      {currentQuestion.difficulty}
                     </span>
                   )}
                 </div>
                 <div className="text-[13px] text-muted-foreground/80 leading-relaxed space-y-4">
-                  <p>{question.description}</p>
+                  <p>{currentQuestion.description}</p>
                 </div>
 
                 {(() => {
                   let testCases: any[] = [];
                   try {
-                    const raw = question.test_cases;
+                    const raw = currentQuestion.test_cases;
                     if (Array.isArray(raw)) testCases = raw;
                     else if (typeof raw === 'string') testCases = JSON.parse(raw);
                   } catch { }
@@ -545,11 +620,14 @@ const Game: React.FC = () => {
                         </h4>
                         <div className="space-y-2">
                           {gameState.myTeam.map((member, i) => (
-                            <div key={member.user_id} className="flex items-center gap-2 text-xs bg-white/5 p-2 rounded-lg border border-white/5">
-                              <span className="text-[12px] opacity-70">{i === 0 ? '👑' : '⚔'}</span>
+                            <div key={member.user_id} className={`flex items-center gap-2 text-xs p-2 rounded-lg border ${gameState.disconnectedPlayers.includes(member.user_id) ? 'bg-red-950/20 border-red-500/20 opacity-60' : 'bg-white/5 border-white/5'}`}>
+                              <span className="text-[12px] opacity-70">{gameState.disconnectedPlayers.includes(member.user_id) ? '⚡' : i === 0 ? '👑' : '⚔'}</span>
                               <span className={`font-mono truncate ${member.user_id === profile?.user_id ? 'text-primary font-bold' : 'text-zinc-300'}`}>
                                 {member.username}{member.user_id === profile?.user_id && ' (You)'}
                               </span>
+                              {gameState.disconnectedPlayers.includes(member.user_id) && (
+                                <span className="text-[8px] text-red-400 font-bold uppercase tracking-wider ml-auto">DC</span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -560,9 +638,12 @@ const Game: React.FC = () => {
                         </h4>
                         <div className="space-y-2">
                           {gameState.enemyTeam.map((member) => (
-                            <div key={member.user_id} className="flex items-center gap-2 text-xs bg-red-950/20 p-2 rounded-lg border border-accent/10">
-                              <span className="text-[12px] opacity-70">💀</span>
+                            <div key={member.user_id} className={`flex items-center gap-2 text-xs p-2 rounded-lg border ${gameState.disconnectedPlayers.includes(member.user_id) ? 'bg-red-950/30 border-red-500/30 opacity-50' : 'bg-red-950/20 border-accent/10'}`}>
+                              <span className="text-[12px] opacity-70">{gameState.disconnectedPlayers.includes(member.user_id) ? '⚡' : '💀'}</span>
                               <span className="font-mono text-zinc-400 truncate">{member.username}</span>
+                              {gameState.disconnectedPlayers.includes(member.user_id) && (
+                                <span className="text-[8px] text-red-400 font-bold uppercase tracking-wider ml-auto animate-pulse">DISCONNECTED</span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -577,7 +658,7 @@ const Game: React.FC = () => {
           <ResizableHandle className="w-[2px] bg-background border-x border-white/5 transition-colors hover:bg-primary/30 z-20" />
 
           {/* ─── RIGHT PANEL: Editor Zone ─── */}
-          <ResizablePanel defaultSize={65} minSize={40} className={`flex flex-col bg-[#0d1117] relative ${sabotageEffects.shake ? 'animate-shake' : ''}`}>
+          <ResizablePanel defaultSize={65} minSize={40} className={`flex flex-col bg-[#0d1117] relative transition-transform duration-300 ${gameState.incomingSabotage === 'shake' ? 'animate-sabotage-shake' : ''} ${gameState.incomingSabotage === 'invert' ? 'sabotage-flip' : ''}`}>
 
             <ResizablePanelGroup direction="vertical">
               <ResizablePanel defaultSize={75} minSize={30} className="flex flex-col relative z-0">
@@ -588,7 +669,7 @@ const Game: React.FC = () => {
                   </div>
                   <div className="text-[9px] text-white/20 font-mono tracking-widest uppercase">Monaco Editor</div>
                 </div>
-                <div className={`flex-1 pt-2 ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''}`}>
+                <div className={`flex-1 pt-2 ${gameState.incomingSabotage === 'invert' ? 'sabotage-flip' : ''}`}>
                   <Editor
                     height="100%"
                     defaultLanguage="python"

@@ -24,6 +24,8 @@ interface GameSessionState {
   matchStatus: string;
   winnerTeam: string | null;
   isFinishing?: boolean;
+  disconnectedPlayers: string[]; // user_ids of disconnected players
+  incomingSabotage: 'fog' | 'invert' | 'shake' | 'memeNuke' | null; // sabotage inflicted by opponent
   _raw?: {
     startedAt: string | null;
     myPenalties: number;
@@ -77,11 +79,15 @@ export const useGameSession = (matchId?: string) => {
     isMyTurn: true,
     matchStatus: 'pending',
     winnerTeam: null,
-    isFinishing: false
+    isFinishing: false,
+    disconnectedPlayers: [],
+    incomingSabotage: null
   });
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
+  const presenceChannelRef = useRef<any>(null);
+  const surrenderCalledRef = useRef(false);
 
   // Calculate if sabotages are unlocked (after half-time)
   const checkSabotagesUnlocked = useCallback((currentTime: number, totalTime: number) => {
@@ -246,14 +252,119 @@ export const useGameSession = (matchId?: string) => {
 
     setIsLoading(false);
 
+    // ── MATCH PRESENCE CHANNEL (disconnect detection) ──
+    if (presenceChannelRef.current) {
+      supabase.removeChannel(presenceChannelRef.current);
+    }
+
+    const allPlayerIds = [...(matchData as any).team_a, ...(matchData as any).team_b] as string[];
+    const enemyIds = isTeamA ? (matchData as any).team_b : (matchData as any).team_a;
+
+    const presenceChannel = supabase.channel(`match-presence-${matchId}`, {
+      config: { presence: { key: user.id } }
+    });
+
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState();
+        const presentIds = new Set(Object.keys(state));
+        // Find players who are NOT present
+        const disconnected = allPlayerIds.filter(
+          (id: string) => id !== user.id && !presentIds.has(id)
+        );
+        setGameState(prev => {
+          if (prev.matchStatus === 'completed') return prev;
+          return { ...prev, disconnectedPlayers: disconnected };
+        });
+      })
+      .on('presence', { event: 'leave' }, ({ key }: { key: string }) => {
+        // A player left – check if they are an opponent
+        const isOpponentLeave = (enemyIds as string[]).includes(key);
+
+        setGameState(prev => {
+          if (prev.matchStatus === 'completed' || prev.isFinishing) return prev;
+
+          const newDisconnected = prev.disconnectedPlayers.includes(key)
+            ? prev.disconnectedPlayers
+            : [...prev.disconnectedPlayers, key];
+
+          // Check if ALL opponents have disconnected
+          const allOpponentsGone = (enemyIds as string[]).every(
+            (id: string) => newDisconnected.includes(id)
+          );
+
+          if (isOpponentLeave && allOpponentsGone) {
+            // All opponents left → we win
+            const winTeam = prev._raw?.isTeamA ? 'team_a' : 'team_b';
+            finishMatch(winTeam as 'team_a' | 'team_b');
+          }
+
+          return { ...prev, disconnectedPlayers: newDisconnected };
+        });
+      })
+      .subscribe(async (status: string) => {
+        if (status === 'SUBSCRIBED') {
+          await presenceChannel.track({
+            user_id: user.id,
+            username: profile?.username || 'Unknown',
+          });
+        }
+      });
+
+    presenceChannelRef.current = presenceChannel;
+
+    // ── SABOTAGE BROADCAST CHANNEL ──
+    // Reuse the presence channel for broadcast events
+    presenceChannel.on('broadcast', { event: 'sabotage' }, (payload: any) => {
+      const { type, sender_id } = payload.payload || {};
+      // Only apply if sender is an opponent (not from our own team)
+      if (sender_id === user.id) return;
+      const isFromEnemy = (enemyIds as string[]).includes(sender_id);
+      if (!isFromEnemy) return;
+
+      // Set incoming sabotage effect
+      setGameState(prev => ({
+        ...prev,
+        incomingSabotage: type
+      }));
+
+      // Duration based on type
+      const duration = type === 'shake' ? 3000 : type === 'memeNuke' ? 8000 : 5000;
+      setTimeout(() => {
+        setGameState(prev => ({
+          ...prev,
+          incomingSabotage: prev.incomingSabotage === type ? null : prev.incomingSabotage
+        }));
+      }, duration);
+    });
+
+    // ── BEFOREUNLOAD: auto-surrender when player closes tab ──
+    const handleBeforeUnload = () => {
+      if (!surrenderCalledRef.current && matchData.status === 'in_progress') {
+        surrenderCalledRef.current = true;
+        // Use sendBeacon for reliability on tab close
+        if (presenceChannelRef.current) {
+          presenceChannelRef.current.untrack();
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     // Clean up function just for component unmount
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      if (presenceChannelRef.current) {
+        presenceChannelRef.current.untrack();
+        supabase.removeChannel(presenceChannelRef.current);
+        presenceChannelRef.current = null;
+      }
     };
-  }, [matchId, user, calculateTimeRemaining]);
+  }, [matchId, user, profile, calculateTimeRemaining, finishMatch]);
 
   // Initialize with team size for demo/practice mode
   const initializeDemo = useCallback((teamSize: TeamSize) => {
@@ -445,6 +556,20 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, loadMatchData]);
 
+  // Send sabotage to opponents via broadcast
+  const sendSabotage = useCallback((type: 'fog' | 'invert' | 'shake' | 'memeNuke') => {
+    if (presenceChannelRef.current && user) {
+      presenceChannelRef.current.send({
+        type: 'broadcast',
+        event: 'sabotage',
+        payload: {
+          type,
+          sender_id: user.id
+        }
+      });
+    }
+  }, [user]);
+
   return {
     gameState,
     startGame,
@@ -455,6 +580,7 @@ export const useGameSession = (matchId?: string) => {
     loadMatchData,
     surrenderMatch,
     finishMatch,
+    sendSabotage,
     isLoading
   };
 };

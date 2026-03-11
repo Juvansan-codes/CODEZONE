@@ -138,3 +138,52 @@
     background-clip: text;
   }
 }
+
+/* ─── SABOTAGE EFFECTS ─── */
+
+/* SHAKE: Wild multi-directional displacement */
+@keyframes sabotage-shake {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  5%   { transform: translate(-25px, 15px) rotate(-3deg); }
+  10%  { transform: translate(30px, -10px) rotate(2deg); }
+  15%  { transform: translate(-15px, -25px) rotate(-4deg); }
+  20%  { transform: translate(20px, 20px) rotate(3deg); }
+  25%  { transform: translate(-30px, 5px) rotate(-2deg); }
+  30%  { transform: translate(10px, -30px) rotate(4deg); }
+  35%  { transform: translate(-20px, 25px) rotate(-3deg); }
+  40%  { transform: translate(25px, -5px) rotate(2deg); }
+  45%  { transform: translate(-10px, -20px) rotate(-4deg); }
+  50%  { transform: translate(30px, 15px) rotate(3deg); }
+  55%  { transform: translate(-25px, -15px) rotate(-2deg); }
+  60%  { transform: translate(15px, 25px) rotate(4deg); }
+  65%  { transform: translate(-20px, -10px) rotate(-3deg); }
+  70%  { transform: translate(30px, -20px) rotate(2deg); }
+  75%  { transform: translate(-15px, 15px) rotate(-4deg); }
+  80%  { transform: translate(20px, -25px) rotate(3deg); }
+  85%  { transform: translate(-30px, 10px) rotate(-2deg); }
+  90%  { transform: translate(15px, 30px) rotate(4deg); }
+  95%  { transform: translate(-20px, -5px) rotate(-3deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+.animate-sabotage-shake {
+  animation: sabotage-shake 0.15s linear infinite;
+}
+
+/* FLIP: 180° upside-down rotation */
+.sabotage-flip {
+  transform: rotate(180deg) !important;
+  transition: transform 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+
+/* FOG: Solid blackout fade-in */
+@keyframes sabotage-fog-in {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-sabotage-fog {
+  animation: sabotage-fog-in 5s ease-in-out forwards;
+}
