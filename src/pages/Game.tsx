@@ -66,7 +66,7 @@ const Game: React.FC = () => {
     deductMyTime,
     deductEnemyTime,
     initializeDemo,
-    surrenderMatch,
+    leaveMatch,
     isLoading
   } = useGameSession(matchId);
 
@@ -327,9 +327,9 @@ const Game: React.FC = () => {
 
   const handleExitMatch = async () => {
     if (gameState.isRunning && !isMatchCompleted) {
-      if (confirm('⚠️ WARNING: Exiting the match will count as a SURRENDER.\\n\\nYou will lose 20 XP. Are you sure?')) {
-        await surrenderMatch();
-        toast.info('You threw in the towel. -20 XP');
+      if (confirm('⚠️ WARNING: Leaving the match will deduct 20 XP. Are you sure?')) {
+        await leaveMatch();
+        toast.info('You left the match. -20 XP');
         navigate('/lobby');
       }
     } else {
@@ -518,8 +518,8 @@ const Game: React.FC = () => {
                                 setShowQuestionList(false);
                               }}
                               className={`w-full text-left p-3 rounded-lg border transition-all group ${isSelected
-                                  ? 'border-primary/40 bg-primary/10 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
-                                  : 'border-white/5 bg-black/20 hover:border-white/10 hover:bg-white/5'
+                                ? 'border-primary/40 bg-primary/10 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                                : 'border-white/5 bg-black/20 hover:border-white/10 hover:bg-white/5'
                                 }`}
                             >
                               <div className="flex items-center justify-between gap-2">
@@ -533,9 +533,9 @@ const Game: React.FC = () => {
                                     </span>
                                   )}
                                   <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-widest border ${q.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10'
-                                      : q.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10'
-                                        : q.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10'
-                                          : 'text-red-400 border-red-400/30 bg-red-400/10'
+                                    : q.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10'
+                                      : q.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10'
+                                        : 'text-red-400 border-red-400/30 bg-red-400/10'
                                     }`}>
                                     {q.difficulty}
                                   </span>
@@ -776,8 +776,8 @@ const Game: React.FC = () => {
                 onClick={submitCode}
                 disabled={isExecuting || (question ? isQuestionSolved(question.id) : true)}
                 className={`h-10 px-8 font-extrabold tracking-widest uppercase gap-2 transition-all text-[11px] ${question && isQuestionSolved(question.id)
-                    ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed opacity-60'
-                    : 'bg-gradient-to-r from-gold to-amber-500 text-black shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:scale-[1.02]'
+                  ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed opacity-60'
+                  : 'bg-gradient-to-r from-gold to-amber-500 text-black shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:scale-[1.02]'
                   }`}
               >
                 {question && isQuestionSolved(question.id) ? (

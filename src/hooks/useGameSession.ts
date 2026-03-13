@@ -357,19 +357,34 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, gameState._raw]);
 
-  // Surrender match
-  const surrenderMatch = useCallback(async () => {
+  // Leave match (replaces surrender)
+  const leaveMatch = useCallback(async () => {
     if (!matchId) return;
 
     // Optimistic update (stop game logic locally)
     setGameState(prev => ({ ...prev, isRunning: false }));
 
     try {
-      await (supabase.rpc as any)('surrender_match', { match_id_param: matchId });
+      await (supabase.rpc as any)('leave_match', { match_id_param: matchId });
     } catch (error) {
-      console.error('Surrender failed:', error);
+      console.error('Leave match failed:', error);
     }
   }, [matchId]);
+
+  // Poll for disconnected players every 15s
+  useEffect(() => {
+    if (!matchId || !gameState.isRunning) return;
+
+    const interval = setInterval(async () => {
+      try {
+        await (supabase.rpc as any)('check_match_timeouts', { match_id_param: matchId });
+      } catch (err) {
+        console.error('Timeout check failed:', err);
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [matchId, gameState.isRunning]);
 
   // Timer effect
   useEffect(() => {
@@ -453,7 +468,7 @@ export const useGameSession = (matchId?: string) => {
     deductEnemyTime,
     initializeDemo,
     loadMatchData,
-    surrenderMatch,
+    leaveMatch,
     finishMatch,
     isLoading
   };
