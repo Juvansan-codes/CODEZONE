@@ -3,11 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useGameSession, TeamSize } from '@/hooks/useGameSession';
+import { useQuestionProgress } from '@/hooks/useQuestionProgress';
 import { usePyodide } from '@/hooks/usePyodide';
 import { useAuth } from '@/contexts/AuthContext';
 import { useGame } from '@/contexts/GameContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Terminal, Play, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Terminal, Play, CheckCircle2, XCircle, Loader2, ChevronDown, ChevronUp, List, Lock } from 'lucide-react';
 import { getRankFromXP } from '@/lib/utils';
 import Editor from '@monaco-editor/react';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
@@ -76,8 +77,17 @@ const Game: React.FC = () => {
     (!gameState._raw?.isTeamA && gameState.winnerTeam === 'team_b')
   );
 
+  // Question progress hook
+  const {
+    questions,
+    selectedQuestion: question,
+    setSelectedQuestion,
+    isQuestionSolved,
+    recordSolution,
+    isLoadingQuestions,
+  } = useQuestionProgress(matchId);
+
   const [wins, setWins] = useState(0);
-  const [question, setQuestion] = useState<any>({ title: 'Loading...', description: 'Fetching question...' });
   const [code, setCode] = useState('// Loading environment...');
   const [logs, setLogs] = useState<string[]>(['Arena ready — fight begins!']);
   const [sabotageEffects, setSabotageEffects] = useState<{ fog: boolean; invert: boolean; shake: boolean }>({
@@ -87,6 +97,7 @@ const Game: React.FC = () => {
   const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
   const [customInput, setCustomInput] = useState('');
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [showQuestionList, setShowQuestionList] = useState(false);
   const { runPython, isInitializing: isPyodideLoading } = usePyodide();
 
   // Audio Instance
@@ -126,29 +137,12 @@ const Game: React.FC = () => {
     };
   }, [audio, settings.bgmEnabled, settings.musicVolume]);
 
-  // Fetch questions from DB
+  // Load template code when question changes
   useEffect(() => {
-    const fetchQuestions = async () => {
-      const { data, error } = await supabase
-        .from('questions')
-        .select('*');
-
-      if (!error && data && data.length > 0) {
-        // For now, just pick the first one or random
-        setQuestion(data[0]);
-        setCode(data[0].template_code || '# Write your solution here');
-      } else {
-        // Fallback if no questions in DB
-        setQuestion({
-          title: 'No Questions Found',
-          description: 'Please add questions in Admin Dashboard.',
-          id: '0',
-          difficulty: 'Easy'
-        } as any);
-      }
-    };
-    fetchQuestions();
-  }, []);
+    if (question) {
+      setCode(question.template_code || '# Write your solution here');
+    }
+  }, [question?.id]);
 
   const validateCode = () => {
     if (!code || code.trim() === '') {
@@ -200,6 +194,13 @@ const Game: React.FC = () => {
 
   const submitCode = async () => {
     if (!validateCode()) return;
+    if (!question) return;
+
+    // Client-side guard: block if already solved
+    if (isQuestionSolved(question.id)) {
+      toast.error('🔒 You already solved this question!');
+      return;
+    }
 
     setConsoleOutput([]); // Clear previous output
     setIsExecuting(true);
@@ -223,7 +224,7 @@ const Game: React.FC = () => {
         toast.error('❌ VALIDATION SERVER ERROR');
       } else {
         // Render test case results
-        let outputLines = [];
+        let outputLines: string[] = [];
         data.results.forEach((res: any) => {
           outputLines.push(`Test ${res.test_idx + 1}: ${res.status}`);
           if (res.status !== 'Passed') {
@@ -233,14 +234,26 @@ const Game: React.FC = () => {
           outputLines.push(`  Time: ${res.time_ms}ms`);
         });
 
-        setConsoleOutput([{ type: 'log', content: outputLines.join('\\n') }]);
+        setConsoleOutput([{ type: 'log', content: outputLines.join('\n') }]);
 
         if (data.all_passed) {
-          deductEnemyTime(30);
-          toast.success('🔥 CODE PERFECT! CRITICAL HIT! -30s');
-          addLog('Code submitted and passed all tests! Enemy obliterated!');
+          // Call the RPC to record the solve and apply sabotage
+          const result = await recordSolution(question.id, true);
+
+          if (result.blocked) {
+            toast.error('🔒 Already solved — no sabotage applied.');
+            addLog(`Question "${question.title}" was already solved.`);
+          } else if (result.sabotage_applied) {
+            toast.success('🔥 CODE PERFECT! CRITICAL HIT! -30s enemy penalty!');
+            addLog(`Solved "${question.title}"! Enemy obliterated with -30s penalty!`);
+          } else {
+            toast.success('✅ All tests passed!');
+          }
         } else {
-          toast.error('❌ Some tests failed.');
+          // Incorrect — record for stats but allow retry
+          await recordSolution(question.id, false);
+          toast.error('❌ Some tests failed. Try again!');
+          addLog(`Submission for "${question.title}" failed. Keep trying!`);
         }
       }
     } catch (err: any) {
@@ -468,54 +481,139 @@ const Game: React.FC = () => {
           {/* ─── LEFT PANEL ─── */}
           <ResizablePanel defaultSize={35} minSize={25} className="flex flex-col">
             <ResizablePanelGroup direction="vertical">
-              <ResizablePanel defaultSize={60} minSize={30} className="p-5 overflow-y-auto bg-surface/30 custom-scrollbar">
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <h2 className="font-bold text-lg leading-tight text-white/90">{question.title}</h2>
-                  {question.difficulty && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap uppercase tracking-widest border shadow-sm ${question.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' : question.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' : question.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' : 'text-red-400 border-red-400/30 bg-red-400/10'}`}>
-                      {question.difficulty}
-                    </span>
-                  )}
+              <ResizablePanel defaultSize={60} minSize={30} className="flex flex-col overflow-hidden bg-surface/30">
+                {/* Question List / Detail Toggle */}
+                <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-white/5">
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+                    <List size={12} />
+                    {showQuestionList ? 'Select Question' : (question?.title || 'No Question')}
+                  </div>
+                  <button
+                    onClick={() => setShowQuestionList(!showQuestionList)}
+                    className="text-[10px] text-primary hover:text-primary/80 font-bold uppercase tracking-widest transition-colors"
+                  >
+                    {showQuestionList ? 'Back' : `All (${questions.length})`}
+                  </button>
                 </div>
-                <div className="text-[13px] text-muted-foreground/80 leading-relaxed space-y-4">
-                  <p>{question.description}</p>
-                </div>
 
-                {(() => {
-                  let testCases: any[] = [];
-                  try {
-                    const raw = question.test_cases;
-                    if (Array.isArray(raw)) testCases = raw;
-                    else if (typeof raw === 'string') testCases = JSON.parse(raw);
-                  } catch { }
-
-                  const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
-                  if (visible.length === 0) return null;
-
-                  return (
-                    <div className="mt-6 pt-4 border-t border-white/5 space-y-3">
-                      <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest flex items-center gap-2">
-                        <Terminal size={12} /> Test Cases
-                      </p>
-                      {visible.map((tc: any, i: number) => (
-                        <div key={i} className="bg-black/40 rounded-lg p-3 border border-white/5 space-y-2">
-                          <div>
-                            <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Input</span>
-                            <pre className="text-[12px] text-green-300 font-mono whitespace-pre-wrap">{String(tc.input ?? '(none)')}</pre>
-                          </div>
-                          <div className="w-full h-px bg-white/5" />
-                          <div>
-                            <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Output</span>
-                            <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap">{String(tc.output ?? '')}</pre>
-                          </div>
+                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                  {showQuestionList ? (
+                    /* ─── QUESTION LIST ─── */
+                    <div className="space-y-2">
+                      {isLoadingQuestions ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="animate-spin text-primary" />
                         </div>
-                      ))}
-                      {testCases.some((tc: any) => tc && tc.visible === false) && (
-                        <p className="text-[9px] text-accent/50 font-mono italic text-center mt-2">✨ Hidden test cases will run on submit</p>
+                      ) : questions.length === 0 ? (
+                        <div className="text-center text-muted-foreground py-8">No questions available</div>
+                      ) : (
+                        questions.map((q) => {
+                          const solved = isQuestionSolved(q.id);
+                          const isSelected = question?.id === q.id;
+                          return (
+                            <button
+                              key={q.id}
+                              onClick={() => {
+                                setSelectedQuestion(q);
+                                setShowQuestionList(false);
+                              }}
+                              className={`w-full text-left p-3 rounded-lg border transition-all group ${isSelected
+                                  ? 'border-primary/40 bg-primary/10 shadow-[0_0_10px_rgba(16,185,129,0.1)]'
+                                  : 'border-white/5 bg-black/20 hover:border-white/10 hover:bg-white/5'
+                                }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`font-medium text-sm truncate ${isSelected ? 'text-primary' : 'text-white/80'}`}>
+                                  {q.title}
+                                </span>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {solved && (
+                                    <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold uppercase tracking-wider">
+                                      <CheckCircle2 size={10} /> Solved
+                                    </span>
+                                  )}
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-widest border ${q.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10'
+                                      : q.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10'
+                                        : q.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10'
+                                          : 'text-red-400 border-red-400/30 bg-red-400/10'
+                                    }`}>
+                                    {q.difficulty}
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground/60 mt-1 line-clamp-2">{q.description}</p>
+                            </button>
+                          );
+                        })
                       )}
                     </div>
-                  );
-                })()}
+                  ) : (
+                    /* ─── QUESTION DETAIL ─── */
+                    question ? (
+                      <div>
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <h2 className="font-bold text-lg leading-tight text-white/90">{question.title}</h2>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {isQuestionSolved(question.id) && (
+                              <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold uppercase tracking-wider">
+                                <CheckCircle2 size={10} /> Solved
+                              </span>
+                            )}
+                            {question.difficulty && (
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap uppercase tracking-widest border shadow-sm ${question.difficulty === 'Easy' ? 'text-green-400 border-green-400/30 bg-green-400/10' : question.difficulty === 'Medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/10' : question.difficulty === 'Hard' ? 'text-orange-400 border-orange-400/30 bg-orange-400/10' : 'text-red-400 border-red-400/30 bg-red-400/10'}`}>
+                                {question.difficulty}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[13px] text-muted-foreground/80 leading-relaxed space-y-4">
+                          <p>{question.description}</p>
+                        </div>
+
+                        {(() => {
+                          let testCases: any[] = [];
+                          try {
+                            const raw = question.test_cases;
+                            if (Array.isArray(raw)) testCases = raw;
+                            else if (typeof raw === 'string') testCases = JSON.parse(raw);
+                          } catch { }
+
+                          const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
+                          if (visible.length === 0) return null;
+
+                          return (
+                            <div className="mt-6 pt-4 border-t border-white/5 space-y-3">
+                              <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest flex items-center gap-2">
+                                <Terminal size={12} /> Test Cases
+                              </p>
+                              {visible.map((tc: any, i: number) => (
+                                <div key={i} className="bg-black/40 rounded-lg p-3 border border-white/5 space-y-2">
+                                  <div>
+                                    <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Input</span>
+                                    <pre className="text-[12px] text-green-300 font-mono whitespace-pre-wrap">{String(tc.input ?? '(none)')}</pre>
+                                  </div>
+                                  <div className="w-full h-px bg-white/5" />
+                                  <div>
+                                    <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Output</span>
+                                    <pre className="text-[12px] text-zinc-300 font-mono whitespace-pre-wrap">{String(tc.output ?? '')}</pre>
+                                  </div>
+                                </div>
+                              ))}
+                              {testCases.some((tc: any) => tc && tc.visible === false) && (
+                                <p className="text-[9px] text-accent/50 font-mono italic text-center mt-2">✨ Hidden test cases will run on submit</p>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="text-center text-muted-foreground py-8">
+                        <p className="text-sm">No question selected</p>
+                        <button onClick={() => setShowQuestionList(true)} className="text-primary text-xs mt-2 hover:underline">Browse questions →</button>
+                      </div>
+                    )
+                  )}
+                </div>
               </ResizablePanel>
 
               <ResizableHandle className="bg-white/5 h-[2px] transition-colors hover:bg-primary/30" />
@@ -674,9 +772,19 @@ const Game: React.FC = () => {
                 <Play size={14} fill="currentColor" />
                 {isExecuting ? 'Running' : 'Run'}
               </Button>
-              <Button onClick={submitCode} disabled={isExecuting} className="h-10 px-8 bg-gradient-to-r from-gold to-amber-500 text-black font-extrabold tracking-widest uppercase gap-2 transition-all shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:scale-[1.02] text-[11px]">
-                <CheckCircle2 size={14} />
-                {isExecuting ? 'Judging' : 'Submit'}
+              <Button
+                onClick={submitCode}
+                disabled={isExecuting || (question ? isQuestionSolved(question.id) : true)}
+                className={`h-10 px-8 font-extrabold tracking-widest uppercase gap-2 transition-all text-[11px] ${question && isQuestionSolved(question.id)
+                    ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed opacity-60'
+                    : 'bg-gradient-to-r from-gold to-amber-500 text-black shadow-[0_0_15px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:scale-[1.02]'
+                  }`}
+              >
+                {question && isQuestionSolved(question.id) ? (
+                  <><Lock size={14} /> Solved</>
+                ) : (
+                  <><CheckCircle2 size={14} /> {isExecuting ? 'Judging' : 'Submit'}</>
+                )}
               </Button>
             </div>
 
