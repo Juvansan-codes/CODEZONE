@@ -137,6 +137,37 @@ const Game: React.FC = () => {
     };
   }, [audio, settings.bgmEnabled, settings.musicVolume]);
 
+  // Detect browser back button / tab close / refresh → auto-leave match
+  const matchStateRef = useRef({ isRunning: gameState.isRunning, isCompleted: isMatchCompleted });
+  useEffect(() => {
+    matchStateRef.current = { isRunning: gameState.isRunning, isCompleted: isMatchCompleted };
+  }, [gameState.isRunning, isMatchCompleted]);
+
+  useEffect(() => {
+    // beforeunload fires on tab close, refresh, or navigating to external URL
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (matchStateRef.current.isRunning && !matchStateRef.current.isCompleted) {
+        // Fire leave_match via sendBeacon for reliability during page unload
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/rpc/leave_match`;
+        const body = JSON.stringify({ match_id_param: matchId });
+        navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Cleanup fires when the component unmounts (browser back button in SPA)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (matchStateRef.current.isRunning && !matchStateRef.current.isCompleted) {
+        leaveMatch();
+      }
+    };
+  }, [matchId, leaveMatch]);
+
   // Load template code when question changes
   useEffect(() => {
     if (question) {
