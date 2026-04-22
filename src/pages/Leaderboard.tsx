@@ -17,6 +17,15 @@ interface Player {
   tier: string;
 }
 
+interface MatchPlayerRow {
+  user_id: string;
+  is_winner: boolean;
+  profiles: {
+    username?: string;
+    total_wins?: number;
+  } | null;
+}
+
 const getRankIcon = (rank: number) => {
   if (rank === 1) return <Trophy className="text-yellow-400" size={24} />;
   if (rank === 2) return <Medal className="text-gray-300" size={24} />;
@@ -128,7 +137,8 @@ const Leaderboard: React.FC = () => {
           if (matches) {
             // Aggregate wins
             const winCounts: Record<string, { wins: number, username: string, tier: string }> = {};
-            matches.forEach((m: any) => {
+            const typedMatches = matches as MatchPlayerRow[];
+            typedMatches.forEach((m) => {
               const uid = m.user_id;
               if (!winCounts[uid]) {
                 winCounts[uid] = {

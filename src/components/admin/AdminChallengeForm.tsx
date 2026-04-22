@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Json } from '@/integrations/supabase/types';
+
+type QuestionDifficulty = 'Easy' | 'Medium' | 'Hard' | 'Expert';
 
 interface AdminChallengeFormProps {
     questionId?: string | null;
@@ -25,18 +27,19 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
         test_cases: '[]'
     });
 
-    useEffect(() => {
-        if (questionId) {
-            loadQuestion();
-        }
-    }, [questionId]);
+    const getErrorMessage = (error: unknown): string => {
+        if (error instanceof Error) return error.message;
+        return 'Unknown error';
+    };
 
-    const loadQuestion = async () => {
+    const loadQuestion = useCallback(async () => {
+        if (!questionId) return;
+
         setLoading(true);
         const { data, error } = await supabase
             .from('questions')
             .select('*')
-            .eq('id', questionId!)
+            .eq('id', questionId)
             .single();
 
         if (error) {
@@ -52,7 +55,11 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
             });
         }
         setLoading(false);
-    };
+    }, [questionId]);
+
+    useEffect(() => {
+        loadQuestion();
+    }, [loadQuestion]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -72,7 +79,7 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
             const payload = {
                 title: formData.title,
                 description: formData.description,
-                difficulty: formData.difficulty as any,
+                difficulty: formData.difficulty as QuestionDifficulty,
                 game_mode: formData.game_mode,
                 template_code: formData.template_code,
                 test_cases: parsedTestCases
@@ -96,8 +103,8 @@ const AdminChallengeForm: React.FC<AdminChallengeFormProps> = ({ questionId, onC
 
             toast.success(questionId ? 'Question updated' : 'Question created');
             onClose();
-        } catch (error: any) {
-            toast.error('Error saving question: ' + error.message);
+        } catch (error: unknown) {
+            toast.error('Error saving question: ' + getErrorMessage(error));
         } finally {
             setLoading(false);
         }

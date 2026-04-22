@@ -60,7 +60,7 @@ export const useRealTimeLeaderboard = (timeframe: TimeFrame = 'weekly') => {
     }
 
     setLoading(false);
-  }, [timeframe]);
+  }, []);
 
   // Get current user's rank
   const fetchMyRank = useCallback(async (userId: string) => {

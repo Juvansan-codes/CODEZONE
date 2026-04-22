@@ -51,7 +51,7 @@ export const useMatchmaking = () => {
 
   // Subscribe to queue updates (Realtime) + Polling Fallback
   useEffect(() => {
-    if (!queueId) return;
+    if (!queueId || !user) return;
 
     // --- Realtime subscription (fast path) ---
     const channel = supabase
@@ -118,7 +118,7 @@ export const useMatchmaking = () => {
       const { data: matchData } = await supabase
         .from('matches')
         .select('id')
-        .or(`team_a.cs.{"${user!.id}"},team_b.cs.{"${user!.id}"}`)
+        .or(`team_a.cs.{"${user.id}"},team_b.cs.{"${user.id}"}`)
         .eq('status', 'in_progress')
         .gt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString()) // Created in last 2 mins
         .limit(1)
@@ -136,7 +136,7 @@ export const useMatchmaking = () => {
         pollRef.current = null;
       }
     };
-  }, [queueId, handleMatchFound]);
+  }, [queueId, handleMatchFound, user]);
 
   const joinQueue = useCallback(async (mode: GameMode, teamSize: number) => {
     if (!user) {
@@ -268,9 +268,10 @@ export const useMatchmaking = () => {
         }, QUEUE_TIMEOUT_MS);
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Matchmaking error:', err);
-      toast.error('Failed to join matchmaking: ' + err.message);
+      toast.error('Failed to join matchmaking: ' + message);
       setStatus('error');
     }
   }, [user, profile]);

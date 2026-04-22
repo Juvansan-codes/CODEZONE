@@ -16,6 +16,17 @@ interface Challenge {
     is_active: boolean;
 }
 
+interface QuestFormData {
+    title: string;
+    description: string;
+    type: string;
+    goal_type: string;
+    goal_target: number;
+    reward_coins: number;
+    reward_gems: number;
+    is_active: boolean;
+}
+
 const AdminQuestForm: React.FC = () => {
     const [quests, setQuests] = useState<Challenge[]>([]);
     const [loading, setLoading] = useState(true);
@@ -39,12 +50,18 @@ const AdminQuestForm: React.FC = () => {
         if (error) {
             toast.error('Failed to fetch quests');
         } else {
-            // Force cast to match our interface, ignoring outdated schema types
-            setQuests((data as any[])?.map(q => ({
-                ...q,
+            const normalized: Challenge[] = (data ?? []).map((q) => ({
+                id: q.id,
+                title: q.title,
+                description: q.description,
                 type: q.type || 'daily',
-                goal_target: q.goal_target || 1
-            })) as Challenge[]);
+                goal_type: q.goal_type,
+                goal_target: q.goal_target || 1,
+                reward_coins: q.reward_coins,
+                reward_gems: q.reward_gems,
+                is_active: q.is_active,
+            }));
+            setQuests(normalized);
         }
         setLoading(false);
     };
@@ -61,9 +78,20 @@ const AdminQuestForm: React.FC = () => {
             return;
         }
 
+        const questPayload: QuestFormData = {
+            title: formData.title,
+            description: formData.description,
+            type: formData.type || 'daily',
+            goal_type: formData.goal_type || 'matches_won',
+            goal_target: formData.goal_target || 1,
+            reward_coins: formData.reward_coins || 0,
+            reward_gems: formData.reward_gems || 0,
+            is_active: formData.is_active ?? true,
+        };
+
         const { error } = await supabase
             .from('challenges')
-            .insert([formData as any]);
+            .insert([questPayload]);
 
         if (error) {
             toast.error('Error creating quest: ' + error.message);
@@ -122,9 +150,10 @@ const AdminQuestForm: React.FC = () => {
             } else {
                 toast.info('No challenges to reset');
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
             console.error('Reset error:', err);
-            toast.error('Failed to reset challenges: ' + err.message);
+            toast.error('Failed to reset challenges: ' + message);
         } finally {
             setLoading(false);
             fetchQuests();

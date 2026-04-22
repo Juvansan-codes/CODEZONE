@@ -103,8 +103,12 @@ export const usePartySystem = () => {
 
     setLoading(true);
 
-    // First leave any existing party
-    await leaveParty();
+    // Remove current membership if it exists.
+    // This prevents duplicate memberships without relying on the leaveParty callback.
+    await supabase
+      .from('party_members')
+      .delete()
+      .eq('user_id', user.id);
 
     // Create the party
     const { data: partyData, error: partyError } = await supabase
@@ -304,7 +308,7 @@ export const usePartySystem = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [party?.id, fetchParty]);
+  }, [party, fetchParty]);
 
   const isLeader = party?.leader_id === user?.id;
   const isFull = party ? party.members.length >= party.team_size : false;

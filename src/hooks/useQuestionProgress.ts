@@ -8,7 +8,7 @@ export interface Question {
     description: string;
     difficulty: string;
     template_code: string | null;
-    test_cases: any;
+    test_cases: unknown;
     game_mode: string;
 }
 
@@ -25,12 +25,16 @@ interface SubmitResult {
     reason: string;
 }
 
+type RpcInvoker = (fnName: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+
 export const useQuestionProgress = (matchId?: string) => {
     const { user } = useAuth();
     const [questions, setQuestions] = useState<Question[]>([]);
     const [solvedQuestionIds, setSolvedQuestionIds] = useState<Set<string>>(new Set());
     const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
     const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
+
+    const callRpc = supabase.rpc as unknown as RpcInvoker;
 
     // Fetch all questions
     const fetchQuestions = useCallback(async () => {
@@ -43,9 +47,7 @@ export const useQuestionProgress = (matchId?: string) => {
         if (!error && data && data.length > 0) {
             setQuestions(data as unknown as Question[]);
             // Auto-select first question if none selected
-            if (!selectedQuestion) {
-                setSelectedQuestion(data[0] as unknown as Question);
-            }
+            setSelectedQuestion((current) => current ?? (data[0] as unknown as Question));
         }
         setIsLoadingQuestions(false);
     }, []);
@@ -54,7 +56,8 @@ export const useQuestionProgress = (matchId?: string) => {
     const fetchProgress = useCallback(async () => {
         if (!matchId || !user) return;
 
-        const { data, error } = await (supabase.from as any)('match_question_progress')
+        const { data, error } = await supabase
+            .from('match_question_progress')
             .select('question_id, solved, sabotage_applied')
             .eq('match_id', matchId)
             .eq('user_id', user.id)
@@ -88,7 +91,7 @@ export const useQuestionProgress = (matchId?: string) => {
                 return { blocked: true, passed: false, sabotage_applied: false, reason: 'already_solved' };
             }
 
-            const { data, error } = await (supabase.rpc as any)('submit_question_solution', {
+            const { data, error } = await callRpc('submit_question_solution', {
                 match_id_param: matchId,
                 question_id_param: questionId,
                 is_correct: isCorrect,
@@ -108,7 +111,7 @@ export const useQuestionProgress = (matchId?: string) => {
 
             return result;
         },
-        [matchId, isQuestionSolved]
+        [matchId, isQuestionSolved, callRpc]
     );
 
     // Load on mount

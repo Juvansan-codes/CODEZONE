@@ -16,8 +16,29 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 declare global {
   interface Window {
-    loadPyodide: any;
+    loadPyodide: unknown;
   }
+}
+
+interface JudgeTestResult {
+  test_idx: number;
+  status: string;
+  error_message?: string | null;
+  expected_output?: string | null;
+  actual_output?: string | null;
+  time_ms: number;
+}
+
+interface JudgeSubmitResponse {
+  error?: string;
+  all_passed?: boolean;
+  results?: JudgeTestResult[];
+}
+
+interface QuestionTestCase {
+  input?: unknown;
+  output?: unknown;
+  visible?: boolean;
 }
 
 
@@ -173,7 +194,7 @@ const Game: React.FC = () => {
     if (question) {
       setCode(question.template_code || '# Write your solution here');
     }
-  }, [question?.id]);
+  }, [question]);
 
   const validateCode = () => {
     if (!code || code.trim() === '') {
@@ -216,7 +237,7 @@ const Game: React.FC = () => {
         setConsoleOutput([{ type: 'log', content: result.output || '(No output)' }]);
         toast.success(`Ran in ${execTimeMs}ms (Not Validated)`);
       }
-    } catch (err: any) {
+    } catch {
       setConsoleOutput([{ type: 'error', content: 'Local execution failed.' }]);
     } finally {
       setIsExecuting(false);
@@ -248,15 +269,15 @@ const Game: React.FC = () => {
         })
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as JudgeSubmitResponse;
 
       if (data.error) {
         setConsoleOutput([{ type: 'error', content: data.error }]);
         toast.error('❌ VALIDATION SERVER ERROR');
       } else {
         // Render test case results
-        let outputLines: string[] = [];
-        data.results.forEach((res: any) => {
+        const outputLines: string[] = [];
+        (data.results || []).forEach((res) => {
           outputLines.push(`Test ${res.test_idx + 1}: ${res.status}`);
           if (res.status !== 'Passed') {
             if (res.error_message) outputLines.push(`  Error: ${res.error_message}`);
@@ -287,7 +308,7 @@ const Game: React.FC = () => {
           addLog(`Submission for "${question.title}" failed. Keep trying!`);
         }
       }
-    } catch (err: any) {
+    } catch {
       setConsoleOutput([{ type: 'error', content: 'Failed to connect to judge service.' }]);
       toast.error('❌ SERVER ERROR');
     } finally {
@@ -295,7 +316,7 @@ const Game: React.FC = () => {
     }
   };
 
-  const useSabotage = (type: 'fog' | 'invert' | 'shake') => {
+  const triggerSabotage = (type: 'fog' | 'invert' | 'shake') => {
     if (!gameState.sabotagesUnlocked) {
       const halfwayPoint = gameState.matchDuration / 2;
       const remainingUntilUnlock = Math.max(0, gameState.myTeamTime - halfwayPoint);
@@ -321,7 +342,7 @@ const Game: React.FC = () => {
     toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
   };
 
-  const useMemeNuke = () => {
+  const triggerMemeNuke = () => {
     if (!gameState.sabotagesUnlocked) {
       toast.error('⏳ Sabotages unlock at halftime!');
       return;
@@ -473,7 +494,7 @@ const Game: React.FC = () => {
               {([['fog', '🌫', SABOTAGE_COSTS.fog], ['invert', '🔄', SABOTAGE_COSTS.invert], ['shake', '📳', SABOTAGE_COSTS.shake]] as const).map(([type, icon, cost]) => (
                 <button
                   key={type}
-                  onClick={() => useSabotage(type as 'fog' | 'invert' | 'shake')}
+                  onClick={() => triggerSabotage(type)}
                   disabled={!gameState.sabotagesUnlocked}
                   className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all flex items-center gap-1.5
                     ${gameState.sabotagesUnlocked ? 'bg-white/5 hover:bg-white/10 hover:shadow-[0_0_10px_rgba(255,255,255,0.1)] text-white cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
@@ -484,7 +505,7 @@ const Game: React.FC = () => {
               ))}
               <div className="w-px h-4 bg-white/10 mx-1" />
               <button
-                onClick={useMemeNuke}
+                onClick={triggerMemeNuke}
                 disabled={memeCooldown || !gameState.sabotagesUnlocked}
                 className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all flex items-center gap-1.5
                   ${gameState.sabotagesUnlocked && !memeCooldown ? 'bg-accent/10 hover:bg-accent/20 text-accent hover:shadow-[0_0_15px_rgba(239,68,68,0.2)] cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
@@ -602,14 +623,16 @@ const Game: React.FC = () => {
                         </div>
 
                         {(() => {
-                          let testCases: any[] = [];
+                          let testCases: QuestionTestCase[] = [];
                           try {
                             const raw = question.test_cases;
-                            if (Array.isArray(raw)) testCases = raw;
-                            else if (typeof raw === 'string') testCases = JSON.parse(raw);
-                          } catch { }
+                            if (Array.isArray(raw)) testCases = raw as QuestionTestCase[];
+                            else if (typeof raw === 'string') testCases = JSON.parse(raw) as QuestionTestCase[];
+                          } catch {
+                            testCases = [];
+                          }
 
-                          const visible = testCases.filter((tc: any) => tc && tc.visible !== false);
+                          const visible = testCases.filter((tc) => tc && tc.visible !== false);
                           if (visible.length === 0) return null;
 
                           return (
@@ -617,7 +640,7 @@ const Game: React.FC = () => {
                               <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest flex items-center gap-2">
                                 <Terminal size={12} /> Test Cases
                               </p>
-                              {visible.map((tc: any, i: number) => (
+                              {visible.map((tc, i: number) => (
                                 <div key={i} className="bg-black/40 rounded-lg p-3 border border-white/5 space-y-2">
                                   <div>
                                     <span className="text-[9px] text-muted-foreground/40 font-bold uppercase tracking-widest mb-1 block">Input</span>
@@ -630,7 +653,7 @@ const Game: React.FC = () => {
                                   </div>
                                 </div>
                               ))}
-                              {testCases.some((tc: any) => tc && tc.visible === false) && (
+                              {testCases.some((tc) => tc && tc.visible === false) && (
                                 <p className="text-[9px] text-accent/50 font-mono italic text-center mt-2">✨ Hidden test cases will run on submit</p>
                               )}
                             </div>

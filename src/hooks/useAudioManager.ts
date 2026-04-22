@@ -55,6 +55,8 @@ export const useAudioManager = () => {
 
   // Initialize audio elements
   useEffect(() => {
+    const sfxMap = sfxRefs.current;
+
     // Create music element
     musicRef.current = new Audio();
     musicRef.current.loop = true;
@@ -64,7 +66,7 @@ export const useAudioManager = () => {
       const audio = new Audio();
       audio.preload = 'auto';
       // Don't set src until we have actual files
-      sfxRefs.current.set(key, audio);
+      sfxMap.set(key, audio);
     });
 
     setAudioLoaded(true);
@@ -74,10 +76,10 @@ export const useAudioManager = () => {
         musicRef.current.pause();
         musicRef.current = null;
       }
-      sfxRefs.current.forEach(audio => {
+      sfxMap.forEach(audio => {
         audio.pause();
       });
-      sfxRefs.current.clear();
+      sfxMap.clear();
     };
   }, []);
 

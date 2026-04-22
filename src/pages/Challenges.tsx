@@ -8,6 +8,23 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 
+interface ChallengeRow {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  reward_coins: number;
+  reward_gems: number;
+  reward_xp: number;
+  goal_target: number;
+}
+
+interface UserChallengeRow {
+  challenge_id: string;
+  progress: number;
+  claimed_at: string | null;
+}
+
 interface Challenge {
   id: string;
   title: string;
@@ -50,7 +67,7 @@ const Challenges: React.FC = () => {
   const totalCoins = challenges.reduce((acc, curr) => acc + (curr.reward_coins || 0), 0);
   const totalGems = challenges.reduce((acc, curr) => acc + (curr.reward_gems || 0), 0);
 
-  const fetchChallenges = async () => {
+  const fetchChallenges = React.useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -71,8 +88,11 @@ const Challenges: React.FC = () => {
       if (uError) throw uError;
 
       // 3. Merge data
-      const merged = (allChallenges as any[])?.map((c: any) => {
-        const progressEntry = userProgress?.find((up: any) => up.challenge_id === c.id);
+      const challengeRows = (allChallenges ?? []) as ChallengeRow[];
+      const userRows = (userProgress ?? []) as UserChallengeRow[];
+
+      const merged = challengeRows.map((c) => {
+        const progressEntry = userRows.find((up) => up.challenge_id === c.id);
         const progressVal = progressEntry ? progressEntry.progress : 0;
 
         const target = c.goal_target || 1;
@@ -117,11 +137,11 @@ const Challenges: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchChallenges();
-  }, [user]);
+  }, [fetchChallenges]);
 
   const handleClaim = async (challengeId: string, rewardCoins: number, rewardGems: number, rewardXp: number = 0) => {
     if (!user) return;
@@ -145,7 +165,7 @@ const Challenges: React.FC = () => {
 
       if (pError || !profile) throw new Error('Profile not found');
 
-      const updates: any = {
+      const updates: Record<string, number> = {
         coins: (profile.coins || 0) + rewardCoins,
         gems: (profile.gems || 0) + rewardGems
       };

@@ -14,8 +14,8 @@ import { useMatchmaking } from '@/hooks/useMatchmaking';
 // Fallback for missing jQuery types if still an issue
 declare global {
   interface Window {
-    $: any;
-    jQuery: any;
+    $: unknown;
+    jQuery: unknown;
   }
 }
 
@@ -117,7 +117,7 @@ const Lobby: React.FC = () => {
         <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary mb-2">
           STUDYGROUND: BATTLEFIELD
         </h1>
-        <p className="text-right text-primary">​       </p>
+        <p className="text-right text-primary"> </p>
       </div>
 
       {/* Character Panel */}

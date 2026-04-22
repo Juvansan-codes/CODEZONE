@@ -62,6 +62,8 @@ interface PenaltyPayload {
   amount: number;
 }
 
+type RpcInvoker = (fnName: string, params: Record<string, unknown>) => Promise<unknown>;
+
 export const useGameSession = (matchId?: string) => {
   const { user, profile } = useAuth();
   const [gameState, setGameState] = useState<GameSessionState>({
@@ -81,7 +83,9 @@ export const useGameSession = (matchId?: string) => {
   });
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const channelRef = useRef<any>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const lastTimesRef = useRef({ myTime: MATCH_DURATIONS[5], enemyTime: MATCH_DURATIONS[5] });
+  const callRpc = supabase.rpc as unknown as RpcInvoker;
 
   // Calculate if sabotages are unlocked (after half-time)
   const checkSabotagesUnlocked = useCallback((currentTime: number, totalTime: number) => {
@@ -310,9 +314,9 @@ export const useGameSession = (matchId?: string) => {
         amount: seconds
       };
 
-      await (supabase.rpc as any)('apply_penalty', payload);
+      await callRpc('apply_penalty', payload);
     }
-  }, [matchId, gameState._raw]);
+  }, [matchId, gameState._raw, callRpc]);
 
   // Finish match via RPC
   const finishMatch = useCallback(async (winnerTeam: 'team_a' | 'team_b') => {
@@ -325,7 +329,7 @@ export const useGameSession = (matchId?: string) => {
     });
 
     try {
-      await (supabase.rpc as any)('finish_match', {
+      await callRpc('finish_match', {
         match_id_param: matchId,
         winner_team_param: winnerTeam
       });
@@ -334,7 +338,7 @@ export const useGameSession = (matchId?: string) => {
       // Revert lock on failure so it can be retried
       setGameState(prev => ({ ...prev, isFinishing: false }));
     }
-  }, [matchId]);
+  }, [matchId, callRpc]);
 
   // Deduct time from enemy team (for successful attacks)
   const deductEnemyTime = useCallback(async (seconds: number) => {
@@ -353,9 +357,9 @@ export const useGameSession = (matchId?: string) => {
         amount: seconds
       };
 
-      await (supabase.rpc as any)('apply_penalty', payload);
+      await callRpc('apply_penalty', payload);
     }
-  }, [matchId, gameState._raw]);
+  }, [matchId, gameState._raw, callRpc]);
 
   // Leave match (replaces surrender)
   const leaveMatch = useCallback(async () => {
@@ -365,11 +369,11 @@ export const useGameSession = (matchId?: string) => {
     setGameState(prev => ({ ...prev, isRunning: false }));
 
     try {
-      await (supabase.rpc as any)('leave_match', { match_id_param: matchId });
+      await callRpc('leave_match', { match_id_param: matchId });
     } catch (error) {
       console.error('Leave match failed:', error);
     }
-  }, [matchId]);
+  }, [matchId, callRpc]);
 
   // Poll for disconnected players every 15s
   useEffect(() => {
@@ -377,21 +381,28 @@ export const useGameSession = (matchId?: string) => {
 
     const interval = setInterval(async () => {
       try {
-        await (supabase.rpc as any)('check_match_timeouts', { match_id_param: matchId });
+        await callRpc('check_match_timeouts', { match_id_param: matchId });
       } catch (err) {
         console.error('Timeout check failed:', err);
       }
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [matchId, gameState.isRunning]);
+  }, [matchId, gameState.isRunning, callRpc]);
+
+  useEffect(() => {
+    lastTimesRef.current = {
+      myTime: gameState.myTeamTime,
+      enemyTime: gameState.enemyTeamTime,
+    };
+  }, [gameState.myTeamTime, gameState.enemyTeamTime]);
 
   // Timer effect
   useEffect(() => {
     if (!gameState.isRunning) return;
 
-    let lastMyTime = gameState.myTeamTime;
-    let lastEnemyTime = gameState.enemyTeamTime;
+    let lastMyTime = lastTimesRef.current.myTime;
+    let lastEnemyTime = lastTimesRef.current.enemyTime;
 
     timerRef.current = setInterval(() => {
       setGameState((prev) => {

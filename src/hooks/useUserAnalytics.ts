@@ -36,6 +36,17 @@ export interface AnalyticsData {
 
 const COLORS = ['#68c3a3', '#4a9d7f', '#ff4655', '#fbbf24', '#3b82f6'];
 
+interface RecentMatch {
+  id: string;
+  created_at: string;
+  result: string;
+  xp_earned: number;
+  matches: {
+    game_mode?: string;
+    winner_team?: string;
+  } | null;
+}
+
 export const useUserAnalytics = () => {
   const { user } = useAuth();
   const [data, setData] = useState<AnalyticsData>({
@@ -110,7 +121,8 @@ export const useUserAnalytics = () => {
 
       // Calculate Game Mode Distribution
       const gameModes: Record<string, number> = {};
-      recentMatches?.forEach((match: any) => {
+      const typedRecentMatches = (recentMatches ?? []) as RecentMatch[];
+      typedRecentMatches.forEach((match) => {
         const mode = match.matches?.game_mode || 'Unknown';
         gameModes[mode] = (gameModes[mode] || 0) + 1;
       });
@@ -122,7 +134,7 @@ export const useUserAnalytics = () => {
       }));
 
       // Format Recent Activity
-      const recentActivity = recentMatches?.map((match: any) => {
+      const recentActivity = typedRecentMatches.map((match) => {
         const isWin = match.result === 'win';
         const points = match.xp_earned > 0 ? `+${match.xp_earned} XP` : `${match.xp_earned} XP`;
 
@@ -141,7 +153,7 @@ export const useUserAnalytics = () => {
           points,
           type: isWin ? 'success' as const : 'error' as const,
         };
-      }) || [];
+      });
 
       setData({
         stats: {
