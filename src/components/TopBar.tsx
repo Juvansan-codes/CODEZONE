@@ -29,12 +29,17 @@ const TopBar: React.FC = () => {
 
   return (
     <header className="fixed top-0 left-0 right-0 h-[70px] bg-surface/95 backdrop-blur-md border-b border-border flex items-center justify-between px-4 md:px-6 z-50">
-      {/* Currency */}
-      <div className="flex gap-2 md:gap-4">
-        <CurrencyItem icon="🪙" value={gameData.coins} />
-        <CurrencyItem icon="💎" value={gameData.gems} />
-        <div className="hidden sm:flex">
-          <CurrencyItem icon="⚡" value={gameData.energy} />
+      {/* Logo & Currency */}
+      <div className="flex items-center gap-4 md:gap-6">
+        <Link to="/lobby" className="font-orbitron text-xl font-bold text-primary tracking-wider hover:opacity-80 transition-opacity">
+          CODEZONE
+        </Link>
+        <div className="flex gap-2 md:gap-4">
+          <CurrencyItem icon="🪙" value={gameData.coins} />
+          <CurrencyItem icon="💎" value={gameData.gems} />
+          <div className="hidden sm:flex">
+            <CurrencyItem icon="⚡" value={gameData.energy} />
+          </div>
         </div>
       </div>
 

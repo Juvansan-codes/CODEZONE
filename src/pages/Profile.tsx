@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useGame } from '@/contexts/GameContext';
 import { ArrowLeft, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import CharacterViewer from '@/components/CharacterViewer';
 
 const Profile: React.FC = () => {
   const navigate = useNavigate();
@@ -14,35 +15,26 @@ const Profile: React.FC = () => {
   }, [gameData.xpPercent]);
 
   return (
-    <div className="min-h-screen">
-      {/* Top Nav */}
-      <header className="h-16 flex justify-between items-center px-4 md:px-6 border-b border-border bg-surface/90 backdrop-blur-sm">
-        <Button variant="outline" size="sm" onClick={() => navigate('/lobby')}>
-          <ArrowLeft className="mr-2" size={16} />
-          BACK
-        </Button>
-        <span className="font-orbitron font-bold">PLAYER PROFILE</span>
+    <div className="space-y-6">
+      {/* Title */}
+      <div className="flex justify-between items-center mb-2">
+        <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary">PLAYER PROFILE</h1>
         <Button variant="outline" size="icon" onClick={() => navigate('/settings')}>
           <Settings size={16} />
         </Button>
-      </header>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 min-h-[calc(100vh-64px)]">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left - 3D Character */}
-        <div className="bg-gradient-to-b from-surface to-background border-r border-border flex items-center justify-center p-6">
+        <div className="glass-panel flex items-center justify-center p-6">
           <div className="w-full max-w-md aspect-[3/4] rounded-2xl border border-white/10 bg-gradient-to-b from-white/5 to-transparent overflow-hidden">
-            <iframe
-              title="3D Character"
-              className="w-full h-full"
-              src="https://sketchfab.com/models/0fda28d637324d5694493bd2e0d6d071/embed?ui_theme=dark&autostart=1"
-            />
+            <CharacterViewer />
           </div>
         </div>
 
         {/* Right - Profile Info */}
-        <div className="flex flex-col">
-          <div className="p-6 space-y-6">
-            {/* User Info */}
+        <div className="glass-panel p-6 space-y-6">
+          {/* User Info */}
             <div className="flex items-center gap-4">
               <div className="relative w-20 h-20 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold text-3xl shadow-lg glow-primary">
                 {gameData.username.substring(0, 2).toUpperCase()}
@@ -135,7 +127,6 @@ const Profile: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
   );
 };
 
