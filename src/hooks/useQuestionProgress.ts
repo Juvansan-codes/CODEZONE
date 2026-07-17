@@ -34,7 +34,9 @@ export const useQuestionProgress = (matchId?: string) => {
     const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
     const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
 
-    const callRpc = supabase.rpc.bind(supabase) as unknown as RpcInvoker;
+    const callRpc = useCallback(async (fnName: string, params: Record<string, unknown>) => {
+        return supabase.rpc(fnName, params);
+    }, []) as unknown as RpcInvoker;
 
     // Fetch all questions
     const fetchQuestions = useCallback(async () => {

@@ -31,6 +31,7 @@ const { spawn } = require('child_process');
  * Code Execution Job using local Python
  */
 async function processSubmission(code, testCases) {
+    const base64Code = Buffer.from(code).toString('base64');
     const runnerCode = `
 import json
 import sys
@@ -38,8 +39,9 @@ import time
 import subprocess
 import os
 import tempfile
+import base64
 
-user_code = """${code.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")}"""
+user_code = base64.b64decode("${base64Code}").decode('utf-8')
 
 # Write user code to a temporary file
 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:

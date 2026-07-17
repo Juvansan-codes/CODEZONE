@@ -19,9 +19,21 @@ export const CharacterViewer: React.FC<CharacterViewerProps> = ({ className }) =
       setLoading(false);
     };
 
-    el.addEventListener('load', handleLoad);
+    // Check if it's already loaded (due to cache / fast load)
+    if ((el as any).loaded) {
+      setLoading(false);
+    } else {
+      el.addEventListener('load', handleLoad);
+    }
+
+    // Fallback: force stop loading after 2.0s to prevent getting stuck
+    const fallbackTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 2000);
+
     return () => {
       el.removeEventListener('load', handleLoad);
+      clearTimeout(fallbackTimeout);
     };
   }, []);
 
@@ -49,6 +61,7 @@ export const CharacterViewer: React.FC<CharacterViewerProps> = ({ className }) =
         auto-rotate
         shadow-intensity="1.5"
         exposure="1.0"
+        loading="eager"
         autoplay
         style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
       />

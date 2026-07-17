@@ -25,76 +25,86 @@ interface Party {
 export const usePartySystem = () => {
   const { user, profile } = useAuth();
   const [party, setParty] = useState<Party | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [invites, setInvites] = useState<{ partyId: string; leaderName: string }[]>([]);
 
   // Fetch current party
   const fetchParty = useCallback(async () => {
-    if (!user) return;
-
-    // Check if user is in a party
-    const { data: memberData } = await supabase
-      .from('party_members')
-      .select('party_id')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!memberData) {
-      setParty(null);
+    if (!user) {
+      setLoading(false);
       return;
     }
+    setLoading(true);
+    try {
+      // Check if user is in a party
+      const { data: memberData } = await supabase
+        .from('party_members')
+        .select('party_id')
+        .eq('user_id', user.id)
+        .single();
 
-    // Fetch party details
-    const { data: partyData } = await supabase
-      .from('parties')
-      .select('*')
-      .eq('id', memberData.party_id)
-      .single();
+      if (!memberData) {
+        setParty(null);
+        return;
+      }
 
-    if (!partyData) {
+      // Fetch party details
+      const { data: partyData } = await supabase
+        .from('parties')
+        .select('*')
+        .eq('id', memberData.party_id)
+        .single();
+
+      if (!partyData) {
+        setParty(null);
+        return;
+      }
+
+      // Fetch all members
+      const { data: members } = await supabase
+        .from('party_members')
+        .select('id, user_id, is_ready')
+        .eq('party_id', partyData.id);
+
+      if (!members) {
+        setParty(null);
+        return;
+      }
+
+      // Fetch profiles for members
+      const memberIds = members.map(m => m.user_id);
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('user_id, username, unique_id')
+        .in('user_id', memberIds);
+
+      const partyMembers: PartyMember[] = members.map(m => {
+        const p = profiles?.find(pr => pr.user_id === m.user_id);
+        return {
+          id: m.id,
+          user_id: m.user_id,
+          username: p?.username || 'Unknown',
+          unique_id: p?.unique_id || '',
+          is_ready: m.is_ready,
+          is_leader: m.user_id === partyData.leader_id,
+        };
+      });
+
+      setParty({
+        id: partyData.id,
+        leader_id: partyData.leader_id,
+        game_mode: partyData.game_mode,
+        team_size: partyData.team_size,
+        status: partyData.status as 'forming' | 'queuing' | 'matched',
+        match_id: partyData.match_id,
+        members: partyMembers,
+      });
+    } catch (err) {
+      console.error('Error fetching party:', err);
       setParty(null);
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    // Fetch all members
-    const { data: members } = await supabase
-      .from('party_members')
-      .select('id, user_id, is_ready')
-      .eq('party_id', partyData.id);
-
-    if (!members) {
-      setParty(null);
-      return;
-    }
-
-    // Fetch profiles for members
-    const memberIds = members.map(m => m.user_id);
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('user_id, username, unique_id')
-      .in('user_id', memberIds);
-
-    const partyMembers: PartyMember[] = members.map(m => {
-      const p = profiles?.find(pr => pr.user_id === m.user_id);
-      return {
-        id: m.id,
-        user_id: m.user_id,
-        username: p?.username || 'Unknown',
-        unique_id: p?.unique_id || '',
-        is_ready: m.is_ready,
-        is_leader: m.user_id === partyData.leader_id,
-      };
-    });
-
-    setParty({
-      id: partyData.id,
-      leader_id: partyData.leader_id,
-      game_mode: partyData.game_mode,
-      team_size: partyData.team_size,
-      status: partyData.status as 'forming' | 'queuing' | 'matched',
-      match_id: partyData.match_id,
-      members: partyMembers,
-    });
   }, [user]);
 
   // Create a new party
@@ -277,6 +287,32 @@ export const usePartySystem = () => {
     fetchParty();
   }, [fetchParty]);
 
+  // Subscribe to our own party membership changes (for joins, kicks, surrenders)
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`user-party-membership-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'party_members',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          console.log('[Party] My membership row changed, refetching party details...');
+          fetchParty();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, fetchParty]);
+
   // Subscribe to party changes
   useEffect(() => {
     if (!party) return;
@@ -309,6 +345,81 @@ export const usePartySystem = () => {
       supabase.removeChannel(channel);
     };
   }, [party, fetchParty]);
+
+  // Poll for matchmaking when queuing (leader only)
+  useEffect(() => {
+    if (!party || party.status !== 'queuing' || party.leader_id !== user?.id) return;
+
+    const interval = setInterval(async () => {
+      try {
+        // Find another queuing party with the same settings
+        const { data: opponents, error } = await supabase
+          .from('parties')
+          .select('*')
+          .eq('status', 'queuing')
+          .eq('game_mode', party.game_mode)
+          .eq('team_size', party.team_size)
+          .neq('id', party.id)
+          .order('created_at', { ascending: true })
+          .limit(1);
+
+        if (error || !opponents || opponents.length === 0) return;
+
+        const opponentParty = opponents[0];
+
+        // Fetch opponent members
+        const { data: opponentMembers } = await supabase
+          .from('party_members')
+          .select('user_id')
+          .eq('party_id', opponentParty.id);
+
+        if (!opponentMembers || opponentMembers.length === 0) return;
+
+        // Collect member IDs
+        const myMemberIds = party.members.map(m => m.user_id);
+        const opponentMemberIds = opponentMembers.map(m => m.user_id);
+
+        console.log('[Squad Match] Found opponent party! Matching now...', opponentParty.id);
+
+        // Create the match
+        const { data: match, error: matchError } = await supabase
+          .from('matches')
+          .insert({
+            game_mode: party.game_mode,
+            team_size: party.team_size,
+            status: 'in_progress',
+            team_a: myMemberIds,
+            team_b: opponentMemberIds,
+            started_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (matchError || !match) {
+          console.error('Failed to create match for parties:', matchError);
+          return;
+        }
+
+        // Update both parties to matched
+        await Promise.all([
+          supabase
+            .from('parties')
+            .update({ status: 'matched', match_id: match.id })
+            .eq('id', party.id),
+          supabase
+            .from('parties')
+            .update({ status: 'matched', match_id: match.id })
+            .eq('id', opponentParty.id)
+        ]);
+
+        console.log('[Squad Match] Successfully matched squads!');
+      } catch (err) {
+        console.error('Squad matchmaking poll error:', err);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [party, user, fetchParty]);
 
   const isLeader = party?.leader_id === user?.id;
   const isFull = party ? party.members.length >= party.team_size : false;

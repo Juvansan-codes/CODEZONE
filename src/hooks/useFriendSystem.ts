@@ -54,7 +54,7 @@ export const useFriendSystem = () => {
     // Fetch profiles for all friends
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('user_id, username, unique_id')
+      .select('user_id, username, unique_id, is_online')
       .in('user_id', friendUserIds);
 
     const mappedFriends: Friend[] = friendships.map((f) => {
@@ -67,7 +67,7 @@ export const useFriendSystem = () => {
         username: profile?.username || 'Unknown',
         uniqueId: profile?.unique_id || '',
         status: f.status as 'pending' | 'accepted' | 'rejected',
-        isOnline: false, // Will be updated by usePresence hook
+        isOnline: profile?.is_online || false,
         isSentByMe: f.user_id === user.id,
       };
     });

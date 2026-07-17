@@ -168,6 +168,12 @@ const Game: React.FC = () => {
     matchStateRef.current = { isRunning: gameState.isRunning, isCompleted: isMatchCompleted };
   }, [gameState.isRunning, isMatchCompleted]);
 
+  // Use a ref for leaveMatch to avoid recreating the unmount effect on every render
+  const leaveMatchRef = useRef(leaveMatch);
+  useEffect(() => {
+    leaveMatchRef.current = leaveMatch;
+  }, [leaveMatch]);
+
   useEffect(() => {
     // beforeunload fires on tab close, refresh, or navigating to external URL
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -184,14 +190,14 @@ const Game: React.FC = () => {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
 
-    // Cleanup fires when the component unmounts (browser back button in SPA)
+    // Cleanup fires ONLY when the component unmounts (browser back button in SPA)
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (matchStateRef.current.isRunning && !matchStateRef.current.isCompleted) {
-        leaveMatch();
+        leaveMatchRef.current();
       }
     };
-  }, [matchId, leaveMatch]);
+  }, [matchId]);
 
   // Load template code when question changes
   useEffect(() => {

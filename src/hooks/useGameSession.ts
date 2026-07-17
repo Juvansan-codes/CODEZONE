@@ -85,7 +85,9 @@ export const useGameSession = (matchId?: string) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastTimesRef = useRef({ myTime: MATCH_DURATIONS[5], enemyTime: MATCH_DURATIONS[5] });
-  const callRpc = supabase.rpc.bind(supabase) as unknown as RpcInvoker;
+  const callRpc = useCallback(async (fnName: string, params: Record<string, unknown>) => {
+    return supabase.rpc(fnName, params);
+  }, []) as unknown as RpcInvoker;
   const clockSkewRef = useRef(0);
 
   // Sync clock skew with the database server using Date header of the Supabase URL
@@ -141,7 +143,46 @@ export const useGameSession = (matchId?: string) => {
     // Sync clock before calculating times
     await syncClock();
 
-    // Get match details
+    // STEP 0: Ensure our presence is fresh BEFORE any timeout checks can fire
+    await supabase
+      .from('profiles')
+      .update({ is_online: true, last_seen: new Date().toISOString() })
+      .eq('user_id', user.id);
+
+    // STEP 1: Pre-register into match_players BEFORE fetching match data.
+    // This ensures the server-side check_match_timeouts sees active players
+    // even if it fires between match creation and Game page load.
+    // We need to know which team we're on first, so do a lightweight fetch.
+    const { data: teamCheck } = await supabase
+      .from('matches')
+      .select('team_a, team_b')
+      .eq('id', matchId)
+      .single();
+
+    if (teamCheck) {
+      const myTeam = teamCheck.team_a.includes(user.id) ? 'team_a' : 'team_b';
+
+      const { data: existingPlayer } = await supabase
+        .from('match_players')
+        .select('id')
+        .eq('match_id', matchId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!existingPlayer) {
+        await supabase
+          .from('match_players')
+          .insert({
+            match_id: matchId,
+            user_id: user.id,
+            team: myTeam,
+            status: 'active'
+          });
+        console.log('[Match] Self-registered into match_players');
+      }
+    }
+
+    // STEP 2: Now fetch full match details
     const { data: matchData, error: matchError } = await supabase
       .from('matches')
       .select('*')
@@ -151,6 +192,29 @@ export const useGameSession = (matchId?: string) => {
     if (matchError || !matchData) {
       setIsLoading(false);
       return;
+    }
+
+    // STEP 3: Auto-recover erroneously completed matches.
+    // If the match was "completed" but the game lasted less than 30 seconds,
+    // it was killed by check_match_timeouts due to empty match_players.
+    // Reset it back to in_progress so the players can actually play.
+    let effectiveStatus = matchData.status;
+    let effectiveWinner = matchData.winner_team;
+    if (matchData.status === 'completed' && matchData.started_at) {
+      const startMs = new Date(matchData.started_at).getTime();
+      const endMs = matchData.ended_at ? new Date(matchData.ended_at).getTime() : Date.now();
+      const matchDurationActual = (endMs - startMs) / 1000;
+
+      if (matchDurationActual < 30) {
+        console.warn(`[Match] Match completed in ${matchDurationActual.toFixed(0)}s — auto-recovering as in_progress`);
+        // Reset the match on the server
+        await supabase
+          .from('matches')
+          .update({ status: 'in_progress', winner_team: null, ended_at: null })
+          .eq('id', matchId);
+        effectiveStatus = 'in_progress';
+        effectiveWinner = null;
+      }
     }
 
     const teamSize = matchData.team_size as TeamSize;
@@ -178,9 +242,9 @@ export const useGameSession = (matchId?: string) => {
         myTeamTime: myTime,
         enemyTeamTime: enemyTime,
         matchDuration,
-        isRunning: matchData.status === 'in_progress',
-        matchStatus: matchData.status,
-        winnerTeam: matchData.winner_team,
+        isRunning: effectiveStatus === 'in_progress',
+        matchStatus: effectiveStatus,
+        winnerTeam: effectiveWinner,
         // Store raw values for potential recalculation
         _raw: {
           startedAt: matchData.started_at,
@@ -222,13 +286,28 @@ export const useGameSession = (matchId?: string) => {
             const myTime = calculateTimeRemaining(matchDuration, newData.started_at, myPenalties);
             const enemyTime = calculateTimeRemaining(matchDuration, newData.started_at, enemyPenalties);
 
+            // GUARD: Reject premature match completion.
+            // If the server marks the match 'completed' but it started less than
+            // 120 seconds ago, this was caused by check_match_timeouts finding
+            // empty match_players. Ignore it and keep playing.
+            let effectiveStatus = newData.status;
+            let effectiveWinner = newData.winner_team;
+            if (newData.status === 'completed' && newData.started_at) {
+              const matchAgeMs = (Date.now() - clockSkewRef.current) - new Date(newData.started_at).getTime();
+              if (matchAgeMs < 120_000) {
+                console.warn(`[Match Realtime] Ignoring premature completion (match age: ${(matchAgeMs / 1000).toFixed(0)}s)`);
+                effectiveStatus = prev.matchStatus; // Keep current status
+                effectiveWinner = prev.winnerTeam;
+              }
+            }
+
             return {
               ...prev,
               myTeamTime: myTime,
               enemyTeamTime: enemyTime,
-              isRunning: newData.status === 'in_progress',
-              matchStatus: newData.status,
-              winnerTeam: newData.winner_team,
+              isRunning: effectiveStatus === 'in_progress',
+              matchStatus: effectiveStatus,
+              winnerTeam: effectiveWinner,
               _raw: {
                 startedAt: newData.started_at,
                 myPenalties,
@@ -288,33 +367,6 @@ export const useGameSession = (matchId?: string) => {
         enemyTeam
       }));
     }
-
-    // Ensure this player is registered in match_players (critical for disconnect detection)
-    // The server trigger may not populate this table, so the client self-registers.
-    const { data: existingPlayer } = await supabase
-      .from('match_players')
-      .select('id')
-      .eq('match_id', matchId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (!existingPlayer) {
-      await supabase
-        .from('match_players')
-        .insert({
-          match_id: matchId,
-          user_id: user.id,
-          team: isTeamA ? 'team_a' : 'team_b',
-          status: 'active'
-        });
-      console.log('[Match] Self-registered into match_players');
-    }
-
-    // Also ensure our presence is fresh for disconnect detection
-    await supabase
-      .from('profiles')
-      .update({ is_online: true, last_seen: new Date().toISOString() })
-      .eq('user_id', user.id);
 
     setIsLoading(false);
 
@@ -443,28 +495,20 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, callRpc]);
 
-  // Poll for disconnected players — delayed start (45s grace period) and 30s interval
-  // This prevents premature match termination before players fully load in.
-  useEffect(() => {
-    if (!matchId || !gameState.isRunning) return;
-
-    let interval: NodeJS.Timeout | null = null;
-
-    const delayTimer = setTimeout(() => {
-      interval = setInterval(async () => {
-        try {
-          await callRpc('check_match_timeouts', { match_id_param: matchId });
-        } catch (err) {
-          console.error('Timeout check failed:', err);
-        }
-      }, 30000); // Poll every 30 seconds
-    }, 45000); // Wait 45 seconds before first poll
-
-    return () => {
-      clearTimeout(delayTimer);
-      if (interval) clearInterval(interval);
-    };
-  }, [matchId, gameState.isRunning, callRpc]);
+  // DISABLED: check_match_timeouts polling.
+  // This was causing premature match termination because the match_players table
+  // is not populated by the server trigger. The function counts active players
+  // from match_players, finds 0 on both teams, and immediately ends the match.
+  // Match completion is handled by the client-side timer instead.
+  // To re-enable, apply the SQL migration that populates match_players on match creation.
+  // useEffect(() => {
+  //   if (!matchId || !gameState.isRunning) return;
+  //   const interval = setInterval(async () => {
+  //     try { await callRpc('check_match_timeouts', { match_id_param: matchId }); }
+  //     catch (err) { console.error('Timeout check failed:', err); }
+  //   }, 30000);
+  //   return () => clearInterval(interval);
+  // }, [matchId, gameState.isRunning, callRpc]);
 
   useEffect(() => {
     lastTimesRef.current = {

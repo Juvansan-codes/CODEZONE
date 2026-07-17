@@ -28,13 +28,15 @@ self.onmessage = async (event) => {
             throw new Error("Pyodide not loaded yet");
         }
 
-        // Setup standard input piping via sys.stdin
+        // Setup standard input piping via sys.stdin using base64 to avoid interpolation issues
+        const base64Input = btoa(unescape(encodeURIComponent(input_data)));
         const setupCode = `
 import sys
 import io
+import base64
 
 # Setup custom stdin buffer
-sys.stdin = io.StringIO("""${input_data.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'")}""")
+sys.stdin = io.StringIO(base64.b64decode("${base64Input}").decode('utf-8'))
 `;
         await pyodide.runPythonAsync(setupCode);
 

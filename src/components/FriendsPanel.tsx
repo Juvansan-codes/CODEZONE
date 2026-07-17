@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { useFriendSystem } from '@/hooks/useFriendSystem';
 import { useAuth } from '@/contexts/AuthContext';
-import { X, UserPlus, Check, XIcon, Copy, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { usePresence } from '@/hooks/usePresence';
+import { usePartySystem } from '@/hooks/usePartySystem';
+import { X, UserPlus, Check, XIcon, Copy, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -21,7 +24,7 @@ interface FriendsPanelProps {
 }
 
 const FriendsPanel: React.FC<FriendsPanelProps> = ({ isOpen, onClose }) => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { 
     friends, 
     pendingRequests, 
@@ -31,6 +34,9 @@ const FriendsPanel: React.FC<FriendsPanelProps> = ({ isOpen, onClose }) => {
     rejectFriendRequest, 
     removeFriend 
   } = useFriendSystem();
+
+  const { isUserOnline } = usePresence();
+  const { party, createParty } = usePartySystem();
   
   const [friendId, setFriendId] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -86,6 +92,43 @@ const FriendsPanel: React.FC<FriendsPanelProps> = ({ isOpen, onClose }) => {
     } else {
       toast.info('Friend removed');
     }
+  };
+
+  const handleInviteFriend = async (friendUserId: string) => {
+    let currentPartyId = party?.id;
+
+    if (!currentPartyId) {
+      toast.info('Initializing squad...');
+      const res = await createParty('duel', 5);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      currentPartyId = res.partyId;
+    }
+
+    if (!currentPartyId) return;
+
+    // Send broadcast invite via Supabase Realtime
+    const channel = supabase.channel(`invites-${friendUserId}`);
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        const sent = await channel.send({
+          type: 'broadcast',
+          event: 'invite',
+          payload: {
+            partyId: currentPartyId,
+            leaderName: profile?.username || 'Opponent',
+          }
+        });
+        
+        toast.success('Squad invitation sent!');
+        // Clean up the channel after sending
+        setTimeout(() => {
+          supabase.removeChannel(channel);
+        }, 1000);
+      }
+    });
   };
 
   const copyMyId = () => {
@@ -199,32 +242,53 @@ const FriendsPanel: React.FC<FriendsPanelProps> = ({ isOpen, onClose }) => {
                   No friends yet. Add some!
                 </div>
               ) : (
-                friends.map((friend) => (
-                  <div
-                    key={friend.id}
-                    className="flex justify-between items-center p-4 bg-black/30 rounded-lg border border-border"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          friend.isOnline ? 'bg-green-500' : 'bg-muted-foreground'
-                        }`}
-                      />
-                      <div>
-                        <span className="font-medium">{friend.username}</span>
-                        <p className="text-xs text-muted-foreground font-mono">
-                          {friend.uniqueId}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRemove(friend.id)}
-                      className="text-accent hover:scale-110 transition-transform p-2"
+                friends.map((friend) => {
+                  const friendIsOnline = friend.isOnline || isUserOnline(friend.friendId);
+                  const isAlreadyInSquad = party?.members.some((m) => m.user_id === friend.friendId);
+
+                  return (
+                    <div
+                      key={friend.id}
+                      className="flex justify-between items-center p-4 bg-black/30 rounded-lg border border-border"
                     >
-                      <X size={16} />
-                    </button>
-                  </div>
-                ))
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`w-2.5 h-2.5 rounded-full ${
+                            friendIsOnline ? 'bg-green-500' : 'bg-muted-foreground'
+                          }`}
+                        />
+                        <div>
+                          <span className="font-medium">{friend.username}</span>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {friend.uniqueId}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {friendIsOnline ? (
+                        isAlreadyInSquad ? (
+                          <span className="text-xs text-primary font-bold bg-primary/10 border border-primary/20 px-2.5 py-1 rounded font-orbitron animate-pulse">
+                            IN SQUAD
+                          </span>
+                        ) : (
+                          <Button
+                            onClick={() => handleInviteFriend(friend.friendId)}
+                            size="sm"
+                            variant="ghost"
+                            className="text-primary hover:bg-primary/20 hover:scale-105 transition-all p-2 rounded-full h-9 w-9 flex items-center justify-center border border-primary/20 shadow-glow"
+                            title="Invite to Squad"
+                          >
+                            <UserPlus size={18} />
+                          </Button>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic px-2">
+                          Offline
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </TabsContent>
 
