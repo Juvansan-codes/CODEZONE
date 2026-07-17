@@ -125,42 +125,9 @@ const Game: React.FC = () => {
   const [showQuestionList, setShowQuestionList] = useState(false);
   const { runPython, isInitializing: isPyodideLoading } = usePyodide();
 
-  // Audio Instance
-  const [audio] = useState(() => {
-    // Determine the base path based on environment variables or Vite config
-    const basePath = import.meta.env.BASE_URL || '/';
-    const a = new Audio(`${basePath}game-music.mp3`);
-    a.loop = true;
-    return a;
-  });
-
   const addLog = useCallback((msg: string) => {
     setLogs((prev) => [`⚔ ${msg}`, ...prev].slice(0, 50));
   }, []);
-
-  // Handle Play/Pause and Volume
-  useEffect(() => {
-    audio.volume = settings.musicVolume / 100;
-
-    if (settings.bgmEnabled) {
-      if (audio.paused) {
-        audio.play().catch(error => {
-          // Autoplay is blocked by default in modern browsers until user interacts with the document.
-          // Silently ignore this specific error to avoid console spam.
-          if (error.name !== 'NotAllowedError') {
-            console.error("Audio play failed:", error);
-          }
-        });
-      }
-    } else {
-      audio.pause();
-    }
-
-    return () => {
-      audio.pause();
-      audio.currentTime = 0;
-    };
-  }, [audio, settings.bgmEnabled, settings.musicVolume]);
 
   // Detect browser back button / tab close / refresh → auto-leave match
   const matchStateRef = useRef({ isRunning: gameState.isRunning, isCompleted: isMatchCompleted });

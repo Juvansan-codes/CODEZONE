@@ -20,11 +20,18 @@ CREATE TABLE IF NOT EXISTS public.match_question_progress (
 -- RLS
 ALTER TABLE public.match_question_progress ENABLE ROW LEVEL SECURITY;
 
--- Users can read their own progress
+-- Users can read their own progress or progress of matches they are in
 CREATE POLICY "Users can read own progress"
 ON public.match_question_progress
 FOR SELECT
-USING (auth.uid() = user_id);
+USING (
+    auth.uid() = user_id OR
+    EXISTS (
+        SELECT 1 FROM public.matches m
+        WHERE m.id = match_id
+          AND (auth.uid() = ANY(m.team_a) OR auth.uid() = ANY(m.team_b))
+    )
+);
 
 -- Users can insert their own progress rows
 CREATE POLICY "Users can insert own progress"

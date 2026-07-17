@@ -1,9 +1,10 @@
+import { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { GameProvider } from "@/contexts/GameContext";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { GameProvider, useGame } from "@/contexts/GameContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 
 // Pages
@@ -21,13 +22,46 @@ import Challenges from "./pages/Challenges";
 import NotFound from "./pages/NotFound";
 import AdminDashboard from "./pages/AdminDashboard";
 
-
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute";
 import DashboardLayout from "@/components/DashboardLayout";
 import PresenceHandler from '@/components/PresenceHandler';
 
 const queryClient = new QueryClient();
+
+// Global BGM Player component
+const GlobalBGM = () => {
+  const location = useLocation();
+  const { settings } = useGame();
+
+  // Audio Instance for the global track
+  const [bgmAudio] = useState(() => {
+    const basePath = import.meta.env.BASE_URL || '/';
+    const a = new Audio(`${basePath}Epic Battle Music_ Armageddon  Alibi Music.mp3`);
+    a.loop = true;
+    return a;
+  });
+
+  useEffect(() => {
+    const isGamePage = location.pathname === '/game';
+    bgmAudio.volume = settings.musicVolume / 100;
+
+    if (settings.bgmEnabled && !isGamePage) {
+      if (bgmAudio.paused) {
+        bgmAudio.play().catch(error => {
+          // Autoplay blocker handle
+          if (error.name !== 'NotAllowedError') {
+            console.error("Global BGM play failed:", error);
+          }
+        });
+      }
+    } else {
+      bgmAudio.pause();
+    }
+  }, [location.pathname, bgmAudio, settings.bgmEnabled, settings.musicVolume]);
+
+  return null;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -38,6 +72,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter basename="/" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <GlobalBGM />
             <Routes>
               <Route path="/" element={<Gate />} />
               <Route path="/login" element={<Login />} />
