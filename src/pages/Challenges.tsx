@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, Zap, Trophy, Clock, Star, Lock, Loader2, Coins, Gem } from 'lucide-react';
+import { Zap, Trophy, Clock, Star, Lock, Loader2, Coins, Gem } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
@@ -195,21 +195,14 @@ const Challenges: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen">
-      {/* Top Bar */}
-      <header className="fixed top-0 left-0 right-0 h-[70px] bg-surface/95 backdrop-blur-md border-b border-border flex items-center justify-between px-4 md:px-6 z-50">
-        <Button variant="outline" size="sm" onClick={() => navigate('/lobby')}>
-          <ArrowLeft className="mr-2" size={16} />
-          Back to Lobby
-        </Button>
-        <h1 className="font-orbitron text-xl font-bold text-primary flex items-center gap-2">
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Title */}
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary flex items-center gap-2">
           <Zap size={24} />
           CHALLENGES
         </h1>
-        <div className="w-32" />
-      </header>
-
-      <main className="pt-[90px] pb-10 px-4 max-w-4xl mx-auto">
+      </div>
         {/* Daily Bonus */}
         <div className="glass-panel p-6 mb-8 text-center border-2 border-gold/30 bg-gradient-to-br from-gold/10 to-transparent">
           <Trophy className="mx-auto text-gold mb-3" size={48} />
@@ -355,7 +348,6 @@ const Challenges: React.FC = () => {
             ))
           )}
         </div>
-      </main>
     </div>
   );
 };

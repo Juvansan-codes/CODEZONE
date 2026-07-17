@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGame } from '@/contexts/GameContext';
-import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -14,6 +13,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface SettingItemProps {
   label: string;
@@ -34,6 +35,37 @@ const SettingItem: React.FC<SettingItemProps> = ({ label, description, children 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { gameData, settings, updateSettings } = useGame();
+  const { signOut } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast.success('Logged out successfully');
+      navigate('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Failed to log out');
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = confirm(
+      "WARNING: Are you sure you want to permanently delete your account?\n\nThis will completely delete your progress, coins, gems, and profile. This action is irreversible."
+    );
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase.rpc('delete_user_account');
+      if (error) throw error;
+
+      toast.success("Account permanently deleted. We're sorry to see you go!");
+      await signOut();
+      navigate('/');
+    } catch (err: any) {
+      console.error("Account deletion failed:", err);
+      toast.error("Failed to delete account. Please try again later.");
+    }
+  };
 
   const handleSave = () => {
     toast.success('Settings saved!');
@@ -59,18 +91,11 @@ const Settings: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen">
-      {/* Top Bar */}
-      <header className="fixed top-0 left-0 right-0 h-[70px] bg-surface/95 backdrop-blur-md border-b border-border flex items-center justify-between px-4 md:px-6 z-50">
-        <Button variant="outline" size="sm" onClick={() => navigate('/lobby')}>
-          <ArrowLeft className="mr-2" size={16} />
-          Back to Lobby
-        </Button>
-        <h1 className="font-orbitron text-xl font-bold text-primary">SETTINGS</h1>
-        <div className="w-32" />
-      </header>
-
-      <main className="pt-[90px] pb-10 px-4 max-w-3xl mx-auto">
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Title */}
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary">SETTINGS</h1>
+      </div>
         {/* Profile Section */}
         <section className="glass-panel p-6 mb-6">
           <h2 className="font-orbitron text-lg font-bold text-primary mb-5 pb-4 border-b border-border">Profile</h2>
@@ -224,6 +249,31 @@ const Settings: React.FC = () => {
           </SettingItem>
         </section>
 
+        {/* Danger Zone */}
+        <section className="glass-panel p-6 mb-6 border-red-500/20 bg-gradient-to-br from-red-500/5 to-transparent">
+          <h2 className="font-orbitron text-lg font-bold text-red-400 mb-5 pb-4 border-b border-red-500/20">Danger Zone</h2>
+          
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 border-b border-border/50">
+            <div>
+              <p className="font-semibold text-foreground">Sign Out</p>
+              <p className="text-sm text-muted-foreground">Sign out of your active session</p>
+            </div>
+            <Button variant="outline" className="border-border hover:bg-white/5" onClick={handleLogout}>
+              Log Out
+            </Button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4">
+            <div>
+              <p className="font-semibold text-red-400">Permanently Delete Account</p>
+              <p className="text-sm text-muted-foreground">Delete all profile details, stats, and history permanently. This is irreversible.</p>
+            </div>
+            <Button variant="destructive" onClick={handleDeleteAccount}>
+              Delete Account
+            </Button>
+          </div>
+        </section>
+
         {/* Action Buttons */}
         <div className="flex flex-col md:flex-row gap-4 justify-center">
           <Button onClick={handleSave} className="gradient-primary px-8">
@@ -233,7 +283,6 @@ const Settings: React.FC = () => {
             Reset to Default
           </Button>
         </div>
-      </main>
     </div>
   );
 };

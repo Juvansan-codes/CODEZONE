@@ -24,7 +24,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminRoute from "@/components/AdminRoute";
-
+import DashboardLayout from "@/components/DashboardLayout";
 import PresenceHandler from '@/components/PresenceHandler';
 
 const queryClient = new QueryClient();
@@ -44,40 +44,24 @@ const App = () => (
               <Route path="/register" element={<Registration />} />
               <Route path="/otp" element={<OtpVerification />} />
 
-              {/* Protected Routes */}
-              <Route path="/lobby" element={
+              {/* Protected Routes inside unified DashboardLayout */}
+              <Route element={
                 <ProtectedRoute>
-                  <Lobby />
+                  <DashboardLayout />
                 </ProtectedRoute>
-              } />
+              }>
+                <Route path="/lobby" element={<Lobby />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/leaderboard" element={<Leaderboard />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/challenges" element={<Challenges />} />
+              </Route>
+
+              {/* Protected Route outside DashboardLayout (no Sidebar/Topbar) */}
               <Route path="/game" element={
                 <ProtectedRoute>
                   <Game />
-                </ProtectedRoute>
-              } />
-              <Route path="/profile" element={
-                <ProtectedRoute>
-                  <Profile />
-                </ProtectedRoute>
-              } />
-              <Route path="/settings" element={
-                <ProtectedRoute>
-                  <Settings />
-                </ProtectedRoute>
-              } />
-              <Route path="/leaderboard" element={
-                <ProtectedRoute>
-                  <Leaderboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/analytics" element={
-                <ProtectedRoute>
-                  <Analytics />
-                </ProtectedRoute>
-              } />
-              <Route path="/challenges" element={
-                <ProtectedRoute>
-                  <Challenges />
                 </ProtectedRoute>
               } />
 

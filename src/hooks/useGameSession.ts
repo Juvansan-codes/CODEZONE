@@ -85,7 +85,32 @@ export const useGameSession = (matchId?: string) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastTimesRef = useRef({ myTime: MATCH_DURATIONS[5], enemyTime: MATCH_DURATIONS[5] });
-  const callRpc = supabase.rpc as unknown as RpcInvoker;
+  const callRpc = supabase.rpc.bind(supabase) as unknown as RpcInvoker;
+  const clockSkewRef = useRef(0);
+
+  // Sync clock skew with the database server using Date header of the Supabase URL
+  const syncClock = useCallback(async () => {
+    try {
+      const startTime = performance.now();
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/`, {
+        method: 'GET',
+        headers: {
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || ''
+        }
+      });
+      const serverDate = res.headers.get('date');
+      if (serverDate) {
+        const serverMs = new Date(serverDate).getTime();
+        const latency = (performance.now() - startTime) / 2;
+        const localMs = Date.now();
+        const skew = localMs - (serverMs + latency);
+        clockSkewRef.current = skew;
+        console.log(`[Clock Sync] Server time: ${serverDate}, Local skew: ${skew}ms`);
+      }
+    } catch (err) {
+      console.warn('Clock synchronization failed, using 0 offset:', err);
+    }
+  }, []);
 
   // Calculate if sabotages are unlocked (after half-time)
   const checkSabotagesUnlocked = useCallback((currentTime: number, totalTime: number) => {
@@ -99,7 +124,7 @@ export const useGameSession = (matchId?: string) => {
     if (!startedAt) return matchDuration;
 
     const startTime = new Date(startedAt).getTime();
-    const now = new Date().getTime();
+    const now = Date.now() - clockSkewRef.current;
     const elapsedSeconds = Math.floor((now - startTime) / 1000);
 
     return Math.max(0, matchDuration - elapsedSeconds - penalties);
@@ -112,6 +137,9 @@ export const useGameSession = (matchId?: string) => {
     if (!matchId || !user) return;
 
     setIsLoading(true);
+
+    // Sync clock before calculating times
+    await syncClock();
 
     // Get match details
     const { data: matchData, error: matchError } = await supabase
@@ -211,6 +239,19 @@ export const useGameSession = (matchId?: string) => {
           });
         }
       )
+      .on(
+        'broadcast',
+        { event: 'sabotage' },
+        (payload) => {
+          if (payload.payload?.senderId !== user?.id) {
+            window.dispatchEvent(
+              new CustomEvent('receive-sabotage', {
+                detail: { type: payload.payload?.type }
+              })
+            );
+          }
+        }
+      )
       .subscribe();
 
 
@@ -248,6 +289,33 @@ export const useGameSession = (matchId?: string) => {
       }));
     }
 
+    // Ensure this player is registered in match_players (critical for disconnect detection)
+    // The server trigger may not populate this table, so the client self-registers.
+    const { data: existingPlayer } = await supabase
+      .from('match_players')
+      .select('id')
+      .eq('match_id', matchId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (!existingPlayer) {
+      await supabase
+        .from('match_players')
+        .insert({
+          match_id: matchId,
+          user_id: user.id,
+          team: isTeamA ? 'team_a' : 'team_b',
+          status: 'active'
+        });
+      console.log('[Match] Self-registered into match_players');
+    }
+
+    // Also ensure our presence is fresh for disconnect detection
+    await supabase
+      .from('profiles')
+      .update({ is_online: true, last_seen: new Date().toISOString() })
+      .eq('user_id', user.id);
+
     setIsLoading(false);
 
     // Clean up function just for component unmount
@@ -257,7 +325,7 @@ export const useGameSession = (matchId?: string) => {
         channelRef.current = null;
       }
     };
-  }, [matchId, user, calculateTimeRemaining]);
+  }, [matchId, user, calculateTimeRemaining, syncClock]);
 
   // Initialize with team size for demo/practice mode
   const initializeDemo = useCallback((teamSize: TeamSize) => {
@@ -375,19 +443,27 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, callRpc]);
 
-  // Poll for disconnected players every 15s
+  // Poll for disconnected players — delayed start (45s grace period) and 30s interval
+  // This prevents premature match termination before players fully load in.
   useEffect(() => {
     if (!matchId || !gameState.isRunning) return;
 
-    const interval = setInterval(async () => {
-      try {
-        await callRpc('check_match_timeouts', { match_id_param: matchId });
-      } catch (err) {
-        console.error('Timeout check failed:', err);
-      }
-    }, 15000);
+    let interval: NodeJS.Timeout | null = null;
 
-    return () => clearInterval(interval);
+    const delayTimer = setTimeout(() => {
+      interval = setInterval(async () => {
+        try {
+          await callRpc('check_match_timeouts', { match_id_param: matchId });
+        } catch (err) {
+          console.error('Timeout check failed:', err);
+        }
+      }, 30000); // Poll every 30 seconds
+    }, 45000); // Wait 45 seconds before first poll
+
+    return () => {
+      clearTimeout(delayTimer);
+      if (interval) clearInterval(interval);
+    };
   }, [matchId, gameState.isRunning, callRpc]);
 
   useEffect(() => {
@@ -425,16 +501,22 @@ export const useGameSession = (matchId?: string) => {
           prev.matchDuration
         );
 
-        // Check Win/Loss Condition
-        if (newMyTime <= 0 && newEnemyTime > 0) {
+        // Check Win/Loss Condition — with 60-second grace period
+        // Don't end a match that just started (prevents clock-skew false positives)
+        const matchAge = prev._raw?.startedAt
+          ? Math.floor(((Date.now() - clockSkewRef.current) - new Date(prev._raw.startedAt).getTime()) / 1000)
+          : 0;
+        const pastGracePeriod = matchAge > 60;
+
+        if (pastGracePeriod && newMyTime <= 0 && newEnemyTime > 0) {
           if (!prev.isFinishing && prev.matchStatus !== 'completed') {
             finishMatch(prev._raw?.isTeamA ? 'team_b' : 'team_a');
           }
-        } else if (newEnemyTime <= 0 && newMyTime > 0) {
+        } else if (pastGracePeriod && newEnemyTime <= 0 && newMyTime > 0) {
           if (!prev.isFinishing && prev.matchStatus !== 'completed') {
             finishMatch(prev._raw?.isTeamA ? 'team_a' : 'team_b');
           }
-        } else if (newMyTime <= 0 && newEnemyTime <= 0) {
+        } else if (pastGracePeriod && newMyTime <= 0 && newEnemyTime <= 0) {
           if (!prev.isFinishing && prev.matchStatus !== 'completed') {
             finishMatch('team_a');
           }
@@ -471,6 +553,16 @@ export const useGameSession = (matchId?: string) => {
     }
   }, [matchId, loadMatchData]);
 
+  const sendSabotage = useCallback((type: 'fog' | 'invert' | 'shake' | 'memeNuke') => {
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'sabotage',
+        payload: { type, senderId: user?.id }
+      });
+    }
+  }, [user]);
+
   return {
     gameState,
     startGame,
@@ -481,6 +573,7 @@ export const useGameSession = (matchId?: string) => {
     loadMatchData,
     leaveMatch,
     finishMatch,
+    sendSabotage,
     isLoading
   };
 };

@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import TopBar from '@/components/TopBar';
-import Sidebar from '@/components/Sidebar';
 import MapCard from '@/components/MapCard';
-import FriendsPanel from '@/components/FriendsPanel';
 import LoadingScreen from '@/components/LoadingScreen';
+import CharacterViewer from '@/components/CharacterViewer';
+import FriendsPanel from '@/components/FriendsPanel';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Menu, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useMatchmaking } from '@/hooks/useMatchmaking';
+import { Users } from 'lucide-react';
 
 // Fallback for missing jQuery types if still an issue
 declare global {
@@ -37,10 +36,9 @@ const maps = [{
 
 const Lobby: React.FC = () => {
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [friendsOpen, setFriendsOpen] = useState(false);
   const [selectedMode, setSelectedMode] = useState<GameMode>('campaign');
   const [teamSize, setTeamSize] = useState('5');
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const { joinQueue, leaveQueue, status, matchId } = useMatchmaking();
   const loading = status === 'searching' || status === 'found';
 
@@ -77,56 +75,52 @@ const Lobby: React.FC = () => {
 
   const selectedMap = maps.find(m => m.mode === selectedMode) || maps[0];
 
-  return <>
-    {loading && (
-      <div className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center gap-5 z-[9999]">
-        <div className="w-12 h-12 border-4 border-border border-t-primary rounded-full animate-spin" />
-        <span className="font-orbitron text-primary text-lg">
-          {status === 'found' ? 'Match Found! Launching...' : 'Searching for opponents...'}
-        </span>
-        {status === 'searching' && (
-          <button
-            onClick={leaveQueue}
-            className="mt-4 px-6 py-2 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors font-orbitron text-sm"
-          >
-            CANCEL SEARCH
-          </button>
-        )}
-      </div>
-    )}
-    <TopBar />
+  return (
+    <>
+      {loading && (
+        <div className="fixed inset-0 bg-black/95 flex flex-col items-center justify-center gap-5 z-[9999]">
+          <div className="w-12 h-12 border-4 border-border border-t-primary rounded-full animate-spin" />
+          <span className="font-orbitron text-primary text-lg">
+            {status === 'found' ? 'Match Found! Launching...' : 'Searching for opponents...'}
+          </span>
+          {status === 'searching' && (
+            <button
+              onClick={leaveQueue}
+              className="mt-4 px-6 py-2 border border-red-500/50 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors font-orbitron text-sm"
+            >
+              CANCEL SEARCH
+            </button>
+          )}
+        </div>
+      )}
 
-    {/* Float buttons for mobile */}
-    <button onClick={() => setSidebarOpen(true)} className="fixed bottom-6 left-6 z-30 md:hidden bg-primary text-primary-foreground px-4 py-3 rounded-full font-semibold flex items-center gap-2 shadow-lg hover:scale-105 transition-transform">
-      <Menu size={18} />
-      Menu
-    </button>
-
-    <button onClick={() => setFriendsOpen(true)} className="fixed bottom-6 right-6 z-30 bg-primary text-primary-foreground px-4 py-3 rounded-full font-semibold flex items-center gap-2 shadow-lg hover:scale-105 transition-transform">
-      <Users size={18} />
-      Friends
-    </button>
-
-    <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-    <FriendsPanel isOpen={friendsOpen} onClose={() => setFriendsOpen(false)} />
-
-    {/* Main Content */}
-    <main className="pt-[70px] md:pl-[250px] min-h-screen p-4 md:p-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary mb-2">
-          STUDYGROUND: BATTLEFIELD
+          CODEZONE
+
         </h1>
         <p className="text-right text-primary"> </p>
       </div>
 
       {/* Character Panel */}
       <section className="glass-panel p-5 mb-6">
-        <h2 className="font-orbitron font-bold text-primary mb-4">Operator</h2>
-        <div className="w-full h-[250px] md:h-[300px] bg-black/30 rounded-lg overflow-hidden mb-3">
-          <iframe title="Operator" className="w-full h-full" allow="autoplay; fullscreen" src="https://sketchfab.com/models/0fda28d637324d5694493bd2e0d6d071/embed?autospin=0.2&autostart=1&ui_theme=dark&ui_controls=0&ui_hint=0&camera=0&dnt=1" />
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="font-orbitron font-bold text-primary">Operator</h2>
+          <Button
+            onClick={() => setFriendsOpen(true)}
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 border-primary/30 text-primary hover:bg-primary/10"
+          >
+            <Users size={16} />
+            Friends
+          </Button>
         </div>
-        <p className="text-center text-muted-foreground">Code Operative</p>
+        <div className="w-full h-[250px] md:h-[300px] bg-black/30 rounded-lg overflow-hidden mb-3">
+          <CharacterViewer />
+        </div>
+        <p className="text-center text-muted-foreground">Eric/Alastor </p>
       </section>
 
       {/* Map Selection */}
@@ -161,7 +155,8 @@ const Lobby: React.FC = () => {
           START MATCH
         </Button>
       </section>
-    </main>
-  </>;
+      <FriendsPanel isOpen={friendsOpen} onClose={() => setFriendsOpen(false)} />
+    </>
+  );
 };
 export default Lobby;
