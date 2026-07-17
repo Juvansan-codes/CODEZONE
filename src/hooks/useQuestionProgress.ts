@@ -34,7 +34,7 @@ export const useQuestionProgress = (matchId?: string) => {
     const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
     const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
 
-    const callRpc = supabase.rpc as unknown as RpcInvoker;
+    const callRpc = supabase.rpc.bind(supabase) as unknown as RpcInvoker;
 
     // Fetch all questions
     const fetchQuestions = useCallback(async () => {
@@ -102,10 +102,10 @@ export const useQuestionProgress = (matchId?: string) => {
                 return { blocked: false, passed: false, sabotage_applied: false, reason: 'rpc_error' };
             }
 
-            const result = data as SubmitResult;
+            const result = (data as SubmitResult) || { blocked: false, passed: false, sabotage_applied: false, reason: 'no_data' };
 
             // Update local state if solved
-            if (result.passed && result.sabotage_applied) {
+            if (result && result.passed) {
                 setSolvedQuestionIds((prev) => new Set([...prev, questionId]));
             }
 

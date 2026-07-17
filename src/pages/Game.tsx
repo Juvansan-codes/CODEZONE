@@ -88,6 +88,7 @@ const Game: React.FC = () => {
     deductEnemyTime,
     initializeDemo,
     leaveMatch,
+    sendSabotage,
     isLoading
   } = useGameSession(matchId);
 
@@ -115,6 +116,9 @@ const Game: React.FC = () => {
     fog: false, invert: false, shake: false
   });
   const [memeCooldown, setMemeCooldown] = useState(false);
+  const [activeMemeNuke, setActiveMemeNuke] = useState<string | null>(null);
+  const [memeNukeUsed, setMemeNukeUsed] = useState(false);
+  const [shakeOffset, setShakeOffset] = useState({ x: 0, y: 0 });
   const [consoleOutput, setConsoleOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
   const [customInput, setCustomInput] = useState('');
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -196,6 +200,74 @@ const Game: React.FC = () => {
     }
   }, [question]);
 
+  // Handle incoming realtime sabotages
+  useEffect(() => {
+    const handleReceiveSabotage = (e: Event) => {
+      const customEvent = e as CustomEvent<{ type: 'fog' | 'invert' | 'shake' | 'memeNuke' }>;
+      const { type } = customEvent.detail;
+      
+      if (type === 'memeNuke') {
+        const memeIndex = Math.floor(Math.random() * 5) + 1;
+        const basePath = import.meta.env.BASE_URL || '/';
+        const videoUrl = `${basePath}meme nuke/meme${memeIndex}.mp4`;
+        setActiveMemeNuke(videoUrl);
+      } else {
+        setSabotageEffects((prev) => ({ ...prev, [type]: true }));
+        
+        if (type === 'shake') {
+          setShakeOffset({ x: 0, y: 0 });
+        }
+
+        setTimeout(() => {
+          setSabotageEffects((prev) => ({ ...prev, [type]: false }));
+          if (type === 'shake') {
+            setShakeOffset({ x: 0, y: 0 });
+          }
+        }, type === 'shake' ? 8000 : 6000);
+      }
+      
+      toast.warning(`⚠️ Opponent deployed ${type.toUpperCase()} sabotage on you!`);
+    };
+
+    window.addEventListener('receive-sabotage', handleReceiveSabotage);
+    return () => {
+      window.removeEventListener('receive-sabotage', handleReceiveSabotage);
+    };
+  }, []);
+
+  // Safety timer to close active meme nuke video in case of playback failure or long reels
+  useEffect(() => {
+    if (activeMemeNuke) {
+      const timer = setTimeout(() => {
+        setActiveMemeNuke(null);
+      }, 25000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeMemeNuke]);
+
+  const handleEditorReach = () => {
+    if (!sabotageEffects.shake) return;
+    const range = 150;
+    const randomOffset = () => {
+      const val = (Math.random() - 0.5) * range * 2;
+      return val > 0 ? Math.max(50, val) : Math.min(-50, val);
+    };
+    setShakeOffset({
+      x: randomOffset(),
+      y: randomOffset()
+    });
+  };
+
+  const handleMemeEnded = () => {
+    setActiveMemeNuke(null);
+    addLog("Meme Nuke distraction finished.");
+  };
+
+  const handleMemeError = () => {
+    console.warn("Meme video failed to load, falling back to static glitch.");
+    setActiveMemeNuke("https://assets.mixkit.co/videos/preview/mixkit-glitch-screen-effect-background-32240-large.mp4");
+  };
+
   const validateCode = () => {
     if (!code || code.trim() === '') {
       toast.error('❌ Submission rejected: Code cannot be empty.');
@@ -256,24 +328,113 @@ const Game: React.FC = () => {
 
     setConsoleOutput([]); // Clear previous output
     setIsExecuting(true);
-    addLog('Submitting to secure backend judge...');
+    addLog('Submitting solution for validation...');
+
+    let data: JudgeSubmitResponse;
+
+    let parsedTestCases: any[] = [];
+    try {
+      const raw = question.test_cases;
+      if (Array.isArray(raw)) {
+        parsedTestCases = raw;
+      } else if (typeof raw === 'string') {
+        parsedTestCases = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error("Failed to parse test cases:", e);
+      parsedTestCases = [];
+    }
 
     try {
+      // Setup connection signal timeout to abort quickly if server is offline
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
       const judgeUrl = import.meta.env.VITE_JUDGE_URL || 'http://localhost:3001';
       const response = await fetch(`${judgeUrl}/api/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
-          testCases: question.test_cases || []
-        })
+          testCases: parsedTestCases
+        }),
+        signal: controller.signal
       });
 
-      const data = (await response.json()) as JudgeSubmitResponse;
+      clearTimeout(timeoutId);
 
+      if (!response.ok) {
+        throw new Error(`Server status error: ${response.status}`);
+      }
+
+      data = (await response.json()) as JudgeSubmitResponse;
+    } catch (err: any) {
+      console.warn("Backend judge service unavailable, running local browser-based Python compiler validator...", err);
+      addLog("External judge offline. Running validation on local Pyodide runtime...");
+
+      if (isPyodideLoading) {
+        setConsoleOutput([{ type: 'error', content: 'Python local environment is still initializing. Please try again in a few seconds.' }]);
+        toast.error('Local environment loading. Please wait.');
+        setIsExecuting(false);
+        return;
+      }
+
+      // Local compiler execution
+      const results: JudgeTestResult[] = [];
+      let all_passed = true;
+      const testCasesList = parsedTestCases;
+
+      for (let i = 0; i < testCasesList.length; i++) {
+        const tc = testCasesList[i];
+        const tcInput = String(tc.input || '');
+        const tcExpected = String(tc.output || '').trim();
+
+        const startTime = performance.now();
+        const runRes = await runPython(code, tcInput);
+        const execTimeMs = Math.round(performance.now() - startTime);
+
+        if (runRes.isTimeout) {
+          all_passed = false;
+          results.push({
+            test_idx: i,
+            status: 'Time Limit Exceeded',
+            error_message: 'Execution timed out (infinite loop detected)',
+            time_ms: execTimeMs
+          });
+        } else if (runRes.error) {
+          all_passed = false;
+          results.push({
+            test_idx: i,
+            status: 'Runtime Error',
+            error_message: runRes.error,
+            time_ms: execTimeMs
+          });
+        } else {
+          const actualOutput = (runRes.output || '').trim();
+          const passed = actualOutput === tcExpected;
+          if (!passed) {
+            all_passed = false;
+          }
+          results.push({
+            test_idx: i,
+            status: passed ? 'Passed' : 'Failed',
+            expected_output: tcExpected,
+            actual_output: actualOutput,
+            time_ms: execTimeMs
+          });
+        }
+      }
+
+      data = {
+        all_passed,
+        results
+      };
+    }
+
+    try {
       if (data.error) {
         setConsoleOutput([{ type: 'error', content: data.error }]);
-        toast.error('❌ VALIDATION SERVER ERROR');
+        toast.error('❌ VALIDATION ERROR');
       } else {
         // Render test case results
         const outputLines: string[] = [];
@@ -281,7 +442,7 @@ const Game: React.FC = () => {
           outputLines.push(`Test ${res.test_idx + 1}: ${res.status}`);
           if (res.status !== 'Passed') {
             if (res.error_message) outputLines.push(`  Error: ${res.error_message}`);
-            else outputLines.push(`  Expected: ${res.expected_output} | Got: ${res.actual_output}`);
+            else outputLines.push(`  Expected: "${res.expected_output}" | Got: "${res.actual_output}"`);
           }
           outputLines.push(`  Time: ${res.time_ms}ms`);
         });
@@ -308,9 +469,9 @@ const Game: React.FC = () => {
           addLog(`Submission for "${question.title}" failed. Keep trying!`);
         }
       }
-    } catch {
-      setConsoleOutput([{ type: 'error', content: 'Failed to connect to judge service.' }]);
-      toast.error('❌ SERVER ERROR');
+    } catch (saveErr) {
+      console.error("Failed to save validation results:", saveErr);
+      toast.error('❌ Database Sync Error');
     } finally {
       setIsExecuting(false);
     }
@@ -334,12 +495,16 @@ const Game: React.FC = () => {
     deductMyTime(cost);
     addLog(`Used ${type.toUpperCase()} sabotage — cost ${formatTimeVerbose(cost)}`);
 
-    setSabotageEffects((prev) => ({ ...prev, [type]: true }));
-    setTimeout(() => {
-      setSabotageEffects((prev) => ({ ...prev, [type]: false }));
-    }, type === 'shake' ? 500 : 4000);
+    // Send realtime broadcast to the opponent
+    sendSabotage(type);
 
-    toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
+    // If it is local practice mode (opponents are simulated), trigger on ourselves for testing
+    const isPractice = gameState.enemyTeam.some(e => e.user_id.startsWith('enemy-'));
+    if (isPractice) {
+      window.dispatchEvent(new CustomEvent('receive-sabotage', { detail: { type } }));
+    } else {
+      toast.success(`😈 ${type.toUpperCase()} deployed on enemy!`);
+    }
   };
 
   const triggerMemeNuke = () => {
@@ -348,8 +513,8 @@ const Game: React.FC = () => {
       return;
     }
 
-    if (memeCooldown) {
-      toast.error('⏳ Meme Nuke recharging');
+    if (memeNukeUsed) {
+      toast.error('❌ You can only use Meme Nuke once per match!');
       return;
     }
 
@@ -361,20 +526,19 @@ const Game: React.FC = () => {
     }
 
     deductMyTime(cost);
-    setMemeCooldown(true);
+    setMemeNukeUsed(true);
     addLog(`MEME NUKE DEPLOYED — cost ${formatTimeVerbose(cost)}`);
 
-    toast.info(
-      <div className="text-center">
-        <div className="text-4xl mb-2">💀</div>
-        <div className="font-bold">MEME NUKE DEPLOYED!</div>
-        <div className="text-sm mt-1">Enemy will be distracted for 60s</div>
-      </div>,
-      { duration: 5000 }
-    );
+    // Send realtime broadcast to the opponent
+    sendSabotage('memeNuke');
 
-    // Cooldown is 3 minutes
-    setTimeout(() => setMemeCooldown(false), 180000);
+    // If it is local practice mode, trigger on ourselves for testing
+    const isPractice = gameState.enemyTeam.some(e => e.user_id.startsWith('enemy-'));
+    if (isPractice) {
+      window.dispatchEvent(new CustomEvent('receive-sabotage', { detail: { type: 'memeNuke' } }));
+    } else {
+      toast.success('💀 MEME NUKE deployed on enemy!');
+    }
   };
 
   const handleExitMatch = async () => {
@@ -447,9 +611,30 @@ const Game: React.FC = () => {
         </div>
       )}
 
-      {/* Fog overlay */}
-      {sabotageEffects.fog && (
-        <div className="fixed inset-0 pointer-events-none z-50 bg-gradient-radial from-transparent via-black/70 to-black/95" />
+      {/* Meme Nuke Video Overlay */}
+      {activeMemeNuke && (
+        <div className="fixed inset-0 bg-black/95 z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-300">
+          <div className="relative w-full max-w-lg aspect-[9/16] md:max-w-md bg-black rounded-2xl overflow-hidden shadow-2xl border border-primary/20">
+            <video
+              src={activeMemeNuke}
+              autoPlay
+              className="w-full h-full object-cover"
+              onEnded={handleMemeEnded}
+              onError={handleMemeError}
+            />
+            <div className="absolute top-4 left-4 right-4 flex items-center justify-between bg-black/60 px-4 py-2 rounded-full border border-white/10 backdrop-blur-md">
+              <span className="font-orbitron text-xs text-red-500 font-bold tracking-widest animate-pulse">⚠️ MEME NUKE ACTIVE</span>
+              <span className="text-[10px] text-muted-foreground">Distraction active...</span>
+            </div>
+            {/* Fallback skip button in case video blocks or runs too long */}
+            <button
+              onClick={() => setActiveMemeNuke(null)}
+              className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2 rounded-full text-xs font-semibold backdrop-blur-sm transition-colors text-white"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ─── TOP BAR ─── */}
@@ -506,9 +691,9 @@ const Game: React.FC = () => {
               <div className="w-px h-4 bg-white/10 mx-1" />
               <button
                 onClick={triggerMemeNuke}
-                disabled={memeCooldown || !gameState.sabotagesUnlocked}
+                disabled={memeNukeUsed || !gameState.sabotagesUnlocked}
                 className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all flex items-center gap-1.5
-                  ${gameState.sabotagesUnlocked && !memeCooldown ? 'bg-accent/10 hover:bg-accent/20 text-accent hover:shadow-[0_0_15px_rgba(239,68,68,0.2)] cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
+                  ${gameState.sabotagesUnlocked && !memeNukeUsed ? 'bg-accent/10 hover:bg-accent/20 text-accent hover:shadow-[0_0_15px_rgba(239,68,68,0.2)] cursor-pointer' : 'bg-white/[0.02] opacity-30 cursor-not-allowed'}`}
                 title={`Meme Nuke (${formatTimeVerbose(SABOTAGE_COSTS.memeNuke)})`}
               >
                 💀
@@ -729,7 +914,16 @@ const Game: React.FC = () => {
           <ResizableHandle className="w-[2px] bg-background border-x border-white/5 transition-colors hover:bg-primary/30 z-20" />
 
           {/* ─── RIGHT PANEL: Editor Zone ─── */}
-          <ResizablePanel defaultSize={65} minSize={40} className={`flex flex-col bg-[#0d1117] relative ${sabotageEffects.shake ? 'animate-shake' : ''}`}>
+          <ResizablePanel
+            defaultSize={65}
+            minSize={40}
+            className="flex flex-col bg-[#0d1117] relative"
+            onMouseEnter={handleEditorReach}
+            style={sabotageEffects.shake ? {
+              transform: `translate(${shakeOffset.x}px, ${shakeOffset.y}px)`,
+              transition: 'transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)'
+            } : undefined}
+          >
 
             <ResizablePanelGroup direction="vertical">
               <ResizablePanel defaultSize={75} minSize={30} className="flex flex-col relative z-0">
@@ -740,7 +934,14 @@ const Game: React.FC = () => {
                   </div>
                   <div className="text-[9px] text-white/20 font-mono tracking-widest uppercase">Monaco Editor</div>
                 </div>
-                <div className={`flex-1 pt-2 ${sabotageEffects.invert ? 'invert hue-rotate-180' : ''}`}>
+                <div className={`flex-1 pt-2 relative transition-transform duration-500 ${sabotageEffects.invert ? 'rotate-180' : ''}`}>
+                  {sabotageEffects.fog && (
+                    <div className="absolute inset-0 bg-[#09090b]/98 z-50 flex flex-col items-center justify-center border border-primary/20 rounded-lg backdrop-blur-md transition-all duration-300 animate-in fade-in">
+                      <div className="text-5xl mb-3 animate-pulse">🌫️</div>
+                      <p className="font-orbitron text-base text-primary font-bold tracking-widest animate-pulse">SYSTEM FOGGED</p>
+                      <p className="text-xs text-muted-foreground mt-1 px-4 text-center">Your editor is temporarily opaque black</p>
+                    </div>
+                  )}
                   <Editor
                     height="100%"
                     defaultLanguage="python"

@@ -97,7 +97,8 @@ const Lobby: React.FC = () => {
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-orbitron text-2xl md:text-3xl font-bold text-primary mb-2">
-          STUDYGROUND: BATTLEFIELD
+          CODEZONE
+
         </h1>
         <p className="text-right text-primary"> </p>
       </div>
@@ -119,7 +120,7 @@ const Lobby: React.FC = () => {
         <div className="w-full h-[250px] md:h-[300px] bg-black/30 rounded-lg overflow-hidden mb-3">
           <CharacterViewer />
         </div>
-        <p className="text-center text-muted-foreground">Code Operative</p>
+        <p className="text-center text-muted-foreground">Eric/Alastor </p>
       </section>
 
       {/* Map Selection */}
